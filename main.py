@@ -1,15 +1,15 @@
-# ========================================Tutorial================================
-
-# Cach cai bot tu A - Z by LongHip12
-# B1: Tai Vscode tai https://code.visualstudio.com/
-# B2: Tai Python tai https://python.org
-# B3: Tai Extension Duoi day:
-# Python by Microsoft,Jupyter,Path Intellisense,vscodeicon (tuy chon)
-# B5: tai package duoi day:
-# pip install -U discord.py pytz art colorama
-# Invite: https://pastefy.app/OA5O3MX3
-
-# ========================================Code================================
+# ========================================Tutorial==========================================#
+#                                                                                                                                                                                                 #
+#                                                               Cach cai bot tu A - Z by LongHip12                                                                    #
+#                                                               B1: Tai Vscode tai https://code.visualstudio.com                                           #
+#                                                               B2: Tai Python tai https://python.org                                                                 #
+#                                                               B3: Tai Extension Duoi day:                                                                                 #
+#                                                               Python by Microsoft,Jupyter,Path Intellisense,vscodeicon (tuy chon)         #
+#                                                               B5: tai package duoi day:                                                                                    #
+#                                                               pip install -U discord.py pytz art colorama                                                      #
+#                                                               Invite: https://pastefy.app/OA5O3MX3                                                           #
+#                                                                                                                                                                                             #
+# ========================================Code===========================================
 
 import discord
 from discord.ext import commands
@@ -28,7 +28,7 @@ import itertools
 colors = [Fore.RED, Fore.YELLOW, Fore.GREEN, Fore.CYAN, Fore.BLUE, Fore.MAGENTA]
 
 ascii_art = r"""
-_                          _          ____          _
+ _                          _          ____          _
 | |      ___   _ __    ___ | | _   _  | __ )   ___  | |_
 | |     / _ \ | '_ \  / _ \| || | | | |  _ \  / _ \ | __|
 | |___ | (_) || | | ||  __/| || |_| | | |_) || (_) || |_
@@ -311,17 +311,17 @@ async def on_ready():
     load_banned_users()
     
     # In ra trạng thái bot
-    print(f"{Fore.GREEN}[Debug]{Style.RESET_ALL} {Fore.CYAN}{bot.user}{Style.RESET_ALL} đã kết nối thành công!")
-    print(f"{Fore.GREEN}[Debug]{Style.RESET_ALL} Múi giờ: {Fore.YELLOW}UTC+7{Style.RESET_ALL}")
-    print(f"{Fore.GREEN}[Debug]{Style.RESET_ALL} Đã load {Fore.BLUE}{len(ALLOWED_USERS)}{Style.RESET_ALL} user whitelist")
-    print(f"{Fore.GREEN}[Debug]{Style.RESET_ALL} Đã load {Fore.RED}{len(BANNED_USERS)}{Style.RESET_ALL} user bị cấm")
+    print(f"{Fore.CYAN}[Info]{Style.RESET_ALL} {Fore.GREEN}{bot.user}{Style.RESET_ALL} đã kết nối thành công!")
+    print(f"{Fore.CYAN}[Info]{Style.RESET_ALL} Múi giờ: {Fore.YELLOW}UTC+7{Style.RESET_ALL}")
+    print(f"{Fore.CYAN}[Info]{Style.RESET_ALL} Đã load {Fore.BLUE}{len(ALLOWED_USERS)}{Style.RESET_ALL} user whitelist")
+    print(f"{Fore.CYAN}[Info]{Style.RESET_ALL} Đã load {Fore.RED}{len(BANNED_USERS)}{Style.RESET_ALL} user bị cấm")
     
     try:
         synced = await bot.tree.sync()
-        print(f"{Fore.GREEN}[Debug]{Style.RESET_ALL} Đã đồng bộ {Fore.CYAN}{len(synced)}{Style.RESET_ALL} slash command(s)")
+        print(f"{Fore.CYAN}[Info]{Style.RESET_ALL} Đã đồng bộ {Fore.YELLOW}{len(synced)}{Style.RESET_ALL} slash command(s)")
         print("=" * 31 + "Console" + "=" * 29)
     except Exception as e:
-        print(f"{Fore.RED}[Error]{Style.RESET_ALL} Lỗi đồng bộ slash commands: {Fore.YELLOW}{e}{Style.RESET_ALL}")
+        print(f"{Fore.RED}[Error]Lỗi đồng bộ slash commands: {Fore.YELLOW}{e}{Style.RESET_ALL}")
     
 # ==================== CÁC LỆNH MỚI: BAN/UNBAN/WHITELIST ====================
 
@@ -900,11 +900,11 @@ async def whitelist(interaction: discord.Interaction):
         desc = "⚠️ Hiện chưa có user nào trong whitelist."
     else:
         desc = "```\nDanh sách user whitelist:\n"
-        desc += "-" * 31 + "\n"
+        desc += "-" * 21 + "\n"
         for uid, name in data.items():
             desc += f"Tên: {name}\n"
             desc += f"ID : {uid}\n"
-            desc += "-" * 31 + "\n"
+            desc += "-" * 21 + "\n"
         desc += f"Tổng số: {len(data)} user được phép sử dụng lệnh premium\n```"
 
     embed = discord.Embed(
@@ -2843,15 +2843,15 @@ async def on_message(message):
 
 # Chạy bot (THÊM TOKEN CỦA BẠN VÀO ĐÂY)
 if __name__ == "__main__":
-    # Lấy token từ biến môi trường hoặc nhập thủ công
-    token = os.getenv("DISCORD_BOT_TOKEN")
-    
+    # Lấy token từ biến môi trường
+    token = os.getenv("DISCORD_BOT_TOKEN")  # nếu không có, sẽ yêu cầu input
+
     if not token:
-        # Nếu không có token trong biến môi trường, yêu cầu nhập
-        token = input("Vui lòng nhập token bot Discord: ").strip()
-    
+        token = input(Fore.CYAN + "[Info]" + Fore.WHITE + " Vui lòng nhập token bot Discord: " + Style.RESET_ALL).strip()
+
     try:
+        print(Fore.CYAN + "[Info]" + Fore.WHITE + " Đang khởi động bot..." + Style.RESET_ALL)
         bot.run(token)
     except Exception as e:
-        print(f"Lỗi khi khởi động bot: {e}")
-        print("Vui lòng kiểm tra lại token và thử lại.")
+        print(Fore.RED + f"[Error] Lỗi khi khởi động bot: {e}" + Style.RESET_ALL)
+        print(Fore.YELLOW + "[Debug] Vui lòng kiểm tra lại token và thử lại." + Style.RESET_ALL)
