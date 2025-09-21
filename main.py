@@ -6,7 +6,7 @@
 #                                                               B3: Tai Extension Duoi day:                                                                                 #
 #                                                               Python by Microsoft,Jupyter,Path Intellisense,vscodeicon (tuy chon)         #
 #                                                               B5: tai package duoi day:                                                                                    #
-#                                                               pip install -U discord.py pytz art colorama                                                      #
+#                                                               pip install -U discord.py pytz art colorama flask                                                 #
 #                                                               Invite: https://pastefy.app/OA5O3MX3                                                           #
 #                                                                                                                                                                                             #
 # ========================================Code===========================================
@@ -23,6 +23,20 @@ import json
 from colorama import Fore, Style, init
 init(autoreset=True)
 import itertools
+from flask import Flask
+import threading
+
+app = Flask(__name__)
+
+@app.route("/")
+def home():
+    return "Bot đang chạy!"
+
+def run_web():
+    app.run(host="0.0.0.0", port=8080)
+
+# Chạy Flask song song
+threading.Thread(target=run_web).start()
 
 # Màu rainbow chroma
 colors = [Fore.RED, Fore.YELLOW, Fore.GREEN, Fore.CYAN, Fore.BLUE, Fore.MAGENTA]
