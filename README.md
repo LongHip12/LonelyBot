@@ -49,6 +49,8 @@
 
 • `ping` Check Bot Latency
 
+• `invite` Invite Bot To Server
+
 • `whitelist` Check Whitelisted Users
 
 • `máy ảo,cách nhận máy ảo` Show How to Get a Cloud Phone (Auto Reply)
