@@ -1,5 +1,6 @@
 @echo off
 cls
-echo Starting Raider Bot...
+echo Starting Bot...
 python raider.py
 pause
+
