@@ -1,6 +1,9 @@
 # About
+
 • Lonely Bot Is Free And Open Source Spamming & Nukking Bot On Discord.
+
 # Packages
+
 • `discord.py` a package using for running discord bot with python.
 
 • `colorama` a package make the print colorful and more beautiful.
@@ -14,11 +17,17 @@
 # Links
 
 • [Lonely Bot Source](https://github.com/LongHip12/LonelyBot/blob/main/main.py)
+
 • [Requirements](https://github.com/LongHip12/LonelyBot/blob/main/requirements.txt)
+
 • [User Install Bot](https://discord.com/oauth2/authorize?client_id=1410958593041104957)
+
 • [Invite Bot](https://discord.com/oauth2/authorize?client_id=1410958593041104957&permissions=8&integration_type=0&scope=bot+applications.commands)
+
 • [Github](https://github.com/LongHip12/LonelyBot)
+
 • [Discord Server](https://discord.gg/2anc7nHw6b)
+
 # Commands
 • `help` Shows a list of all the commands available in the bot
 
