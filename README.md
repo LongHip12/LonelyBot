@@ -2,6 +2,14 @@
 
 • Lonely Bot Is Free And Open Source Spamming & Nukking Bot On Discord.
 
+# How To Download
+
+• Download [Python](https://python.org)
+
+• Run Install-requirements.bat to intall package to run bot
+
+• Run Start.bat or main.py to run bot
+
 # Packages
 
 • `discord.py` a package using for running discord bot with python.
