@@ -1046,7 +1046,7 @@ async def ghostping(interaction: discord.Interaction, user_id: str, delay: float
     delay="Thời gian delay giữa các lần ping (giây), tối thiểu 0.1",
     quantity="Số lượng ping, mặc định là 5, tối đa 50"
 )
-async def ghostping(interaction: discord.Interaction, user_id: str, delay: float = 0.5, quantity: int = 5):
+async def ghostpingv2(interaction: discord.Interaction, user_id: str, delay: float = 0.5, quantity: int = 5):
     """Slash command ghost ping"""
     # Kiểm tra xem user có bị cấm không
     if is_user_banned(interaction.user.id):
@@ -1224,6 +1224,30 @@ async def dms(interaction: discord.Interaction, user_id: str, message: str):
 )
 async def spam(interaction: discord.Interaction, message: str, quantity: int, user_id: str = None):
     """Slash command spam"""
+    
+    if is_user_banned(interaction.user.id):
+        embed = discord.Embed(
+            title="❌ Bị cấm",
+            description="Bạn đã bị cấm sử dụng bot này!",
+            color=discord.Color.red()
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        return
+        
+    # Kiểm tra guild bị hạn chế
+    if interaction.guild and interaction.guild.id == RESTRICTED_GUILD_ID:
+        embed = discord.Embed(
+            title="❌ Lỗi",
+            description="Lệnh này không được phép sử dụng trong server này!",
+            color=discord.Color.red()
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        return
+    
+    # FIX: Xử lý user_id rỗng
+    if user_id is not None and user_id.strip() == "":
+        user_id = None
+    
     # Kiểm tra giới hạn số lượng
     if quantity > 1000:
         embed = discord.Embed(
@@ -1262,19 +1286,22 @@ async def spam(interaction: discord.Interaction, message: str, quantity: int, us
                     try:
                         await target_user.send(f"{message}")
                         sent_count += 1
-                        await asyncio.sleep(0.5)  # Delay 0.5 giây giữa các tin nhắn
                     except Exception as e:
                         print(f"Lỗi gửi tin nhắn cho user: {e}")
                 
-                # LOG SAU KHI HOÀN THÀNH
+                # LOG SAU KHI HOÀN THÀNH - GIỮ NGUYÊN NỘI DUNG NHƯ CŨ
                 user = f"{interaction.user.name}#{interaction.user.discriminator}"
                 guild_name = interaction.guild.name if interaction.guild else "Direct Message"
                 
-                # Ghi log command
-                log_message = log_command(user, f"/spam message:{message} quantity:{quantity} userid:{user_id} (sent: {sent_count}/{quantity})", guild_name, "Slash Command")
-                await send_dm_notification(user, f"/spam message:{message} quantity:{quantity} userid:{user_id} (sent: {sent_count}/{quantity})", guild_name, "Slash Command")
+                # FIX: Chỉ lấy thông tin target_user.name an toàn, không dùng mention trong log
+                target_display = f"userid:{user_id}"
                 
-                # Thông báo thành công
+                # Ghi log command - GIỮ NGUYÊN FORMAT
+                log_content = f"/spam message:{message} quantity:{quantity}"
+                log_message = log_command(user, log_content, guild_name, "Slash Command")
+                await send_dm_notification(user, log_content, guild_name, "Slash Command")
+                
+                # Thông báo thành công - ở đây vẫn dùng mention vì là embed cho user
                 embed = discord.Embed(
                     title="✅ Hoàn thành",
                     description=f"Đã gửi {sent_count}/{quantity} tin nhắn đến {target_user.mention}",
@@ -1314,13 +1341,14 @@ async def spam(interaction: discord.Interaction, message: str, quantity: int, us
                 except Exception as e:
                     print(f"Lỗi gửi tin nhắn: {e}")
             
-            # LOG SAU KHI HOÀN THÀNH
+            # LOG SAU KHI HOÀN THÀNH - GIỮ NGUYÊN NỘI DUNG NHƯ CŨ
             user = f"{interaction.user.name}#{interaction.user.discriminator}"
             guild_name = interaction.guild.name if interaction.guild else "Direct Message"
             
-            # Ghi log command
-            log_message = log_command(user, f"/spam message:{message} quantity:{quantity} (sent: {sent_count}/{quantity})", guild_name, "Slash Command")
-            await send_dm_notification(user, f"/spam message:{message} quantity:{quantity} (sent: {sent_count}/{quantity})", guild_name, "Slash Command")
+            # Ghi log command - GIỮ NGUYÊN FORMAT
+            log_content = f"/spam message:{message} quantity:{quantity} (sent: {sent_count}/{quantity})"
+            log_message = log_command(user, log_content, guild_name, "Slash Command")
+            await send_dm_notification(user, log_content, guild_name, "Slash Command")
             
             # Thông báo thành công
             embed = discord.Embed(
@@ -1331,12 +1359,16 @@ async def spam(interaction: discord.Interaction, message: str, quantity: int, us
             await interaction.edit_original_response(embed=embed)
     
     except Exception as e:
-        # LOG LỖI
+        # LOG LỖI - GIỮ NGUYÊN NỘI DUNG NHƯ CŨ
         user = f"{interaction.user.name}#{interaction.user.discriminator}"
         guild_name = interaction.guild.name if interaction.guild else "Direct Message"
         
-        log_message = log_command(user, f"/spam message:{message} quantity:{quantity} userid:{user_id} (ERROR: {str(e)})", guild_name, "Slash Command")
-        await send_dm_notification(user, f"/spam message:{message} quantity:{quantity} userid:{user_id} (ERROR: {str(e)})", guild_name, "Slash Command")
+        # FIX: Xử lý target_display an toàn cho log lỗi
+        target_display = f"userid:{user_id}" if user_id else ""
+        log_content = f"/spam message:{message} quantity:{quantity} {target_display} (ERROR: {str(e)})"
+        
+        log_message = log_command(user, log_content, guild_name, "Slash Command")
+        await send_dm_notification(user, log_content, guild_name, "Slash Command")
         
         embed = discord.Embed(
             title="❌ Lỗi",
@@ -1410,7 +1442,7 @@ class SpamButton(discord.ui.View):
     message="Nội dung tin nhắn cần gửi",
     user_id="ID của người dùng cần gửi (để trống nếu gửi ở channel hiện tại)"
 )
-async def spam(interaction: discord.Interaction, message: str, user_id: str = None):
+async def spamv2(interaction: discord.Interaction, message: str, user_id: str = None):
     """Slash command spam - Với nút Spam cố định 5 tin nhắn"""
     # Kiểm tra user banned
     if is_user_banned(interaction.user.id):
@@ -1515,7 +1547,7 @@ async def say(interaction: discord.Interaction, message: str, channel: discord.T
 @app_commands.describe(
     message="Nội dung tin nhắn cần gửi"
 )
-async def say(interaction: discord.Interaction, message: str):
+async def sayv2(interaction: discord.Interaction, message: str):
     """Slash command /say - Gửi 1 tin nhắn (dùng followup.send)"""
     
     # Kiểm tra user bị cấm
@@ -1906,7 +1938,7 @@ async def spampingall(ctx):
         await status_msg.delete()
         
         # Thông báo thành công
-        embed = discord.Emembed(
+        embed = discord.Embed(
             title="✅ Hoàn thành",
             description=f"Đã gửi {msg_count} tin nhắn ping đến tất cả kênh",
             color=discord.Color.green()
@@ -2239,8 +2271,8 @@ async def on_message(message):
                     "• `/info` - Xem thông tin về bot\n"
                     "• `/whitelist` - Xem danh sách user được phép\n"
                     "• `/help` - Hiển thị trợ giúp này\n"
-                    "• `/say` - Làm bot nói gì đó"
-                    "• `/sayv2` - Làm bot nói gì đó (No Need Invite)"
+                    "• `/say` - Làm bot nói gì đó\n"
+                    "• `/sayv2` - Làm bot nói gì đó (No Need Invite)\n"
                     "• `/ghostping <user_id> [delay] [quantity]` - Ghost ping người dùng\n"
                     "• `/ghostpingv2 <user_id> [delay] [quantity]` - Ghost ping người dùng (No Need Invite)\n"
                     "• `/dms <user_id> <message>` - Gửi tin nhắn DM đến người dùng\n"
@@ -2256,11 +2288,11 @@ async def on_message(message):
                 embed.add_field(
                     name="⚡ LỆNH ADMIN (Chỉ cho user được phép)",
                     value=(
-                        "• `/premium_command` - Xem các lệnh premium (admin only)"
-                        "• `/bancmd <user_id> <reason>` - Cấm user dùng lệnh"
-                        "• `/unbancmd <user_id> <reason>` - Gỡ cấm user dùng lệnh"
-                        "• `/bancmdlist` - Xem các users bị cấm dùng lệnh"
-                        "• `/addwhitelist <user_id> <name>` - Add Whitelist Cho Users"
+                        "• `/premium_command` - Xem các lệnh premium (admin only)\n"
+                        "• `/bancmd <user_id> <reason>` - Cấm user dùng lệnh\n"
+                        "• `/unbancmd <user_id> <reason>` - Gỡ cấm user dùng lệnh\n"
+                        "• `/bancmdlist` - Xem các users bị cấm dùng lệnh\n"
+                        "• `/addwhitelist <user_id> <name>` - Add Whitelist Cho Users\n"
                         "• `/removewhitelist <user_id> <name>` - Xoá whitelist của users"
                     ),
                     inline=False
