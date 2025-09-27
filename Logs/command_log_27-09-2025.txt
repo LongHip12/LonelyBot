@@ -1,0 +1,6 @@
+[07:13:51 | 27/09/2025] it_longhip12dev#0: /taixiu tai 1 (Lonely Hub | Community) [Slash Command]
+[07:15:22 | 27/09/2025] it_longhip12dev#0: /shop (Lonely Hub | Community) [Slash Command]
+[07:16:00 | 27/09/2025] it_longhip12dev#0: /buy vip (Lonely Hub | Community) [Slash Command]
+[07:16:17 | 27/09/2025] it_longhip12dev#0: /buy vipplus (Lonely Hub | Community) [Slash Command]
+[07:16:27 | 27/09/2025] it_longhip12dev#0: /buy vipplusplus (Lonely Hub | Community) [Slash Command]
+[07:16:37 | 27/09/2025] it_longhip12dev#0: /buy mvp (Lonely Hub | Community) [Slash Command]
