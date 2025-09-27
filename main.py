@@ -17,6 +17,7 @@ import asyncio
 import random
 import datetime
 import itertools
+import re
 from pathlib import Path
 import discord
 from discord import FFmpegPCMAudio, app_commands
@@ -221,6 +222,29 @@ def remove_balance(user_id, amount):
         return credits[user_id]  # 🔥 Trả về số dư sau khi trừ
     return None
     
+# ====== ECONOMY FUNCTIONS ======
+def get_balance(user_id):
+    return credits.get(str(user_id), 0)
+
+def add_balance(user_id, amount):
+    credits[str(user_id)] = get_balance(user_id) + amount
+    save_json(credits, DATA_FILE)
+
+def remove_balance(user_id, amount):
+    if get_balance(user_id) >= amount:
+        credits[str(user_id)] -= amount
+        save_json(credits, DATA_FILE)
+        return True
+    return False
+
+# THÊM HÀM NÀY - giải quyết lỗi set_balance
+def set_balance(user_id, amount):
+    """Đặt số dư coin cho user (ghi đè giá trị cũ)"""
+    user_id = str(user_id)
+    credits[user_id] = amount
+    save_json(credits, DATA_FILE)
+    return credits[user_id]  # Trả về số dư mới
+    
 def simple_embed(title: str, description: str, color: discord.Color = discord.Color.blue()):
     """
     Hàm tạo embed đơn giản để dùng lại nhiều lần
@@ -278,6 +302,7 @@ UTC7 = pytz.timezone('Asia/Bangkok')  # Bangkok là UTC+7
 
 # GUILD ID bị cấm sử dụng spam và ghostping
 RESTRICTED_GUILD_ID = 1409783780217983029
+TARGET_GUILD_ID = 1409783780217983029
 
 def is_user_allowed(user_id):
     """Kiểm tra xem user có được phép sử dụng lệnh đặc biệt không"""
@@ -364,6 +389,72 @@ def get_utc7_time():
     """Lấy thời gian hiện tại theo UTC+7"""
     now = datetime.datetime.now(UTC7)
     return now
+    
+ROLES = {
+    "vip": {"role_id": 1420718498530721864, "name": "<:vip:1421359862780264489> VIP Rank"},
+    "vipplus": {"role_id": 1420718386786340977, "name": "<:vipplus:1421359801975312436> Vip+ Rank"},
+    "vipplusplus": {"role_id": 1421143311900479588, "name": "<:vipplusplus:1421359758711062619> Vip++ Rank"},
+    "mvp": {"role_id": 1421143426795307018, "name": "<:mvp:1421359907030171699> MVP Rank"},
+    "mvpplus": {"role_id": 1421143520034426971, "name": "<:mvpplus:1421359951028162560> MVP+ Rank"},
+    "mvpplusplus": {"role_id": 1421143612543991900, "name": "<:mvpplusplus:1421359974092902481> MVP++ Rank"},
+    "managerbot": {"role_id": 1410600949646364702, "name": "<:manager:1421365250690777139> Manager Rank"}
+}
+
+ROLE_PRIORITY = [
+    ("managerbot", "[Manager]"),
+    ("mvpplusplus", "[MVP++]"),
+    ("mvpplus", "[MVP+]"),
+    ("mvp", "[MVP]"),
+    ("vipplusplus", "[Vip++]"),
+    ("vipplus", "[Vip+]"),
+    ("vip", "[VIP]")
+]
+
+@tasks.loop(seconds=1)  # check mỗi 30 giây
+async def check_roles():
+    await bot.wait_until_ready()
+    guild = bot.get_guild(TARGET_GUILD_ID)
+    if not guild:
+        return
+
+    for member in guild.members:
+        if member.bot:
+            continue  # bỏ qua bot
+
+        # tìm role cao nhất user có
+        highest_prefix = None
+        for key, prefix in ROLE_PRIORITY:
+            role_id = shop_data.get(key, {}).get("role_id")
+            role = guild.get_role(role_id) if role_id else None
+            if role and role in member.roles:
+                highest_prefix = prefix
+                break
+
+        # nếu có role thì đổi tên
+        if highest_prefix:
+            if not member.display_name.startswith(highest_prefix):
+                try:
+                    await member.edit(nick=f"{highest_prefix} {member.name}")
+                except Exception as e:
+                    print(f"Lỗi đổi tên {member}: {e}")
+        else:
+            # nếu mất hết role thì reset nickname
+            if member.nick and any(member.nick.startswith(p) for _, p in ROLE_PRIORITY):
+                try:
+                    await member.edit(nick=None)
+                except Exception as e:
+                    print(f"Lỗi reset tên {member}: {e}")
+                    
+def extract_name_and_emoji(item_name: str):
+    """
+    Tách emoji custom + tên role từ item['name']
+    VD: "<:vip:1421359862780264489> VIP Role"
+    """
+    match = re.match(r"<:(\w+):(\d+)> ?(.*)", item_name)
+    if match:
+        emoji_name, emoji_id, label = match.groups()
+        return discord.PartialEmoji(name=emoji_name, id=int(emoji_id)), label
+    return None, item_name
     
 # Thêm vào đầu file (sau setup_logging / get_utc7_time)
 def log(message: str):
@@ -486,6 +577,168 @@ async def on_ready():
     
 # ==================== CÁC LỆNH MỚI: BAN/UNBAN/WHITELIST ====================
 
+class ConfirmView(discord.ui.View):
+    def __init__(self, member: discord.Member, role_key: str):
+        super().__init__()
+        self.member = member
+        self.role_key = role_key
+
+    @discord.ui.button(label="Có", style=discord.ButtonStyle.green)
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+        role_id = ROLES[self.role_key]["role_id"]
+        role = discord.utils.get(self.member.guild.roles, id=role_id)
+        if role in self.member.roles:
+            # 🔹 Lấy prefix từ ROLE_PRIORITY
+            prefix = ""
+            for r_key, r_prefix in ROLE_PRIORITY:
+                if r_key == self.role_key:
+                    prefix = r_prefix
+                    break
+
+            # 🔹 Xoá prefix cũ nếu có
+            original_name = self.member.display_name
+            for _, old_prefix in ROLE_PRIORITY:
+                if original_name.startswith(old_prefix):
+                    original_name = original_name[len(old_prefix):].strip()
+                    break
+
+            # 🔹 Gắn prefix mới
+            new_nick = f"{prefix} {original_name}"
+            try:
+                await self.member.edit(nick=new_nick)
+                await interaction.response.send_message(
+                    f"✅ Đổi nickname thành **{new_nick}**",
+                    ephemeral=True
+                )
+            except discord.Forbidden:
+                await interaction.response.send_message(
+                    "❌ Bot không có quyền đổi nickname (có thể là owner hoặc role cao hơn bot)", 
+                    ephemeral=True
+                )
+        else:
+            await interaction.response.send_message("❌ Bạn không có role này!", ephemeral=True)
+        self.stop()
+
+    @discord.ui.button(label="Không", style=discord.ButtonStyle.red)
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_message("❌ Hủy chọn", ephemeral=True)
+        self.stop()
+        
+class RoleSelect(discord.ui.Select):
+    def __init__(self, member: discord.Member):
+        self.member = member
+        options = []
+
+        # Chỉ thêm role mà member đang có
+        for key, item in ROLES.items():
+            role = discord.utils.get(member.guild.roles, id=item["role_id"])
+            if role and role in member.roles:
+                emoji, label = extract_name_and_emoji(item["name"])
+                options.append(discord.SelectOption(
+                    label=label,
+                    value=key,
+                    description=f"Chọn {label}",
+                    emoji=emoji
+                ))
+
+        super().__init__(placeholder="Chọn tag...", min_values=1, max_values=1, options=options)
+
+    async def callback(self, interaction: discord.Interaction):
+        selected_key = self.values[0]
+        role_name = ROLES[selected_key]["name"]
+
+        embed = discord.Embed(
+            title="Xác nhận",
+            description=f"Bạn có muốn chọn tag **{role_name}** không?",
+            color=discord.Color.blue()
+        )
+        await interaction.response.send_message(embed=embed, view=ConfirmView(self.member, selected_key), ephemeral=True)
+        
+class RoleView(discord.ui.View):
+    def __init__(self, member: discord.Member):
+        super().__init__()
+        self.add_item(RoleSelect(member))
+        
+@bot.tree.command(name="tag", description="Chọn tag để đổi nickname")
+async def tag(interaction: discord.Interaction):
+    if is_user_banned(interaction.user.id):
+        embed = discord.Embed(
+            title="❌ Bị cấm",
+            description="Bạn đã bị cấm sử dụng bot này!",
+            color=discord.Color.red()
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        return
+        
+    guild = bot.get_guild(TARGET_GUILD_ID)
+    member = guild.get_member(interaction.user.id)
+
+    if not member:
+        await interaction.response.send_message("❌ Không tìm thấy thành viên!", ephemeral=True)
+        return
+
+    # 🔥 THÊM ĐOẠN KIỂM TRA NÀY
+    has_any_role = False
+    for key, item in ROLES.items():
+        role_id = shop_data.get(key, {}).get("role_id")
+        role = guild.get_role(role_id) if role_id else None
+        if role and role in member.roles:
+            has_any_role = True
+            break
+    
+    if not has_any_role:
+        embed = discord.Embed(
+            title="❌ Không có tag",
+            description="Bạn không có bất kỳ tag nào để chọn!",
+            color=discord.Color.red()
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        return
+
+    embed = discord.Embed(
+        title="Chọn tag",
+        description="Sử dụng dropdown bên dưới để chọn tag mà bạn có.",
+        color=discord.Color.green()
+    )
+    await interaction.response.send_message(embed=embed, view=RoleView(member), ephemeral=True)
+    
+@bot.tree.command(name="resettag", description="Xóa tag prefix khỏi nickname của bạn")
+async def resettag(interaction: discord.Interaction):
+    if is_user_banned(interaction.user.id):
+        embed = discord.Embed(
+            title="❌ Bị cấm",
+            description="Bạn đã bị cấm sử dụng bot này!",
+            color=discord.Color.red()
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        return
+
+    guild = bot.get_guild(TARGET_GUILD_ID)
+    member = guild.get_member(interaction.user.id)
+
+    if not member:
+        await interaction.response.send_message("❌ Không tìm thấy thành viên!", ephemeral=True)
+        return
+
+    # 🔹 Xoá prefix cũ nếu có
+    original_name = member.display_name
+    for _, old_prefix in ROLE_PRIORITY:
+        if original_name.startswith(old_prefix):
+            original_name = original_name[len(old_prefix):].strip()
+            break
+
+    try:
+        await member.edit(nick=original_name)
+        await interaction.response.send_message(
+            f"✅ Đã reset nickname thành **{original_name}**",
+            ephemeral=True
+        )
+    except discord.Forbidden:
+        await interaction.response.send_message(
+            "❌ Bot không có quyền đổi nickname (có thể là owner hoặc role cao hơn bot)", 
+            ephemeral=True
+        )
+        
 # Slash Command - Bancmd: Cấm người dùng sử dụng bot
 @bot.tree.command(name="bancmd", description="Cấm người dùng sử dụng bot")
 @app_commands.describe(user_id="ID của người dùng cần cấm", reason="Lý do cấm")
@@ -580,11 +833,32 @@ async def taixiu(interaction: discord.Interaction, select: app_commands.Choice[s
     bal = get_balance(user_id)
     if bal < amount:
         await interaction.response.send_message(
-            embed=simple_embed("❌ Không đủ coin", f"Bạn chỉ có {bal} coin", discord.Color.red()),
+            embed=simple_embed("❌ Không đủ tiền", f"Bạn chỉ có {bal}<:lonelycoin:1421380256148750429>", discord.Color.red()),
             ephemeral=True
         )
         return
-        
+    
+    # Gửi tin nhắn ban đầu
+    time_left = 40  # có thể chỉnh 40 nếu muốn
+    content = (
+        "<a:emoji_14:1421375592078639105> " * 3 +
+        f"\n**Đang Tung Xúc Xắc...**\nThời Gian Còn Lại: **{time_left}s**"
+    )
+    await interaction.response.send_message(content=content)
+    msg = await interaction.original_response()
+
+    # Đếm ngược và update message
+    while time_left > 0:
+        await asyncio.sleep(1)   # ⏳ chỉnh interval update (3s cho an toàn)
+        time_left -= 1
+        if time_left < 0:
+            time_left = 0
+        content = (
+            "<a:emoji_14:1421375592078639105> " * 3 +
+            f"\n**Đang Tung Xúc Xắc...**\nThời Gian Còn Lại: **{time_left}s**"
+        )
+        await msg.edit(content=content)
+    
     # Tung xúc xắc
     dice = [random.randint(1, 6) for _ in range(3)]
     total = sum(dice)
@@ -594,11 +868,11 @@ async def taixiu(interaction: discord.Interaction, select: app_commands.Choice[s
     win = (select.value == result)
     if win:
         add_balance(user_id, amount)
-        outcome_text = f"🎉 Bạn thắng {amount} coin!"
+        outcome_text = f"🎉 Bạn thắng {amount}<:lonelycoin:1421380256148750429>!"
         color = discord.Color.green()
     else:
         remove_balance(user_id, amount)
-        outcome_text = f"💀 Bạn thua {amount} coin!"
+        outcome_text = f"💀 Bạn thua {amount}<:lonelycoin:1421380256148750429>!"
         color = discord.Color.red()
 
     # 🔥 Lưu lịch sử
@@ -614,10 +888,11 @@ async def taixiu(interaction: discord.Interaction, select: app_commands.Choice[s
     e.add_field(name="Xúc xắc", value=f"🎲 {dice[0]} • 🎲 {dice[1]} • 🎲 {dice[2]}", inline=False)
     e.add_field(name="Tổng", value=f"{total} → {result.upper()}", inline=False)
     e.add_field(name="Kết quả", value=outcome_text, inline=False)
-    e.set_footer(text=f"Số dư: {new_bal} coin")
+    e.set_footer(text=f"Số dư: {new_bal}<:lonelycoin:1421380256148750429>")
     e.set_author(name=str(interaction.user), icon_url=interaction.user.display_avatar.url)
-    await interaction.response.send_message(embed=e)
-    
+
+    await msg.edit(content=None, embed=e)
+
     # LOG command
     user = f"{interaction.user.name}#{interaction.user.discriminator}"
     guild_name = interaction.guild.name if interaction.guild else "Direct Message"
@@ -653,7 +928,7 @@ async def lichsutaixiu(interaction: discord.Interaction):
 
         embed.add_field(
             name=f"⏰ {time}",
-            value=f"{vn_status} {amount} coin\n🎲 {dice_part} = {total} → {vn_result}",
+            value=f"{vn_status} {amount}<:lonelycoin:1421380256148750429>\n🎲 {dice_part} = {total} → {vn_result}",
             inline=False
         )
 
@@ -669,15 +944,15 @@ async def addcoin(interaction: discord.Interaction, user_id: str, amount: int):
         )
         await interaction.response.send_message(embed=embed, ephemeral=True)
         return
+        
+    new_bal = add_balance(user_id, amount)
+    await interaction.response.send_message(embed=simple_embed("✅ Đã Thêm Coin", f"Cộng {amount}<:lonelycoin:1421380256148750429> cho {user_id}\n💰 Số dư: {new_bal}<:lonelycoin:1421380256148750429>", discord.Color.green()))
     
     # LOG command
     user = f"{interaction.user.name}#{interaction.user.discriminator}"
     guild_name = interaction.guild.name if interaction.guild else "Direct Message"
     log_command(user, f"/addcoin {user_id} {amount}", guild_name, "Slash Command")
     await send_dm_notification(user, f"/addcoin {user_id} {amount}", guild_name, "Slash Command")
-    
-    new_bal = add_balance(user_id, amount)
-    await interaction.response.send_message(embed=simple_embed("✅ Đã Thêm Coin", f"Cộng {amount} coin cho {user_id}\n💰 Số dư: {new_bal}", discord.Color.green()))
 
 @bot.tree.command(name="removecoin", description="(Admin) Trừ coin của user")
 async def removecoin(interaction: discord.Interaction, user_id: str, amount: int):
@@ -691,7 +966,7 @@ async def removecoin(interaction: discord.Interaction, user_id: str, amount: int
         return
         
     new_bal = remove_balance(user_id, amount)
-    await interaction.response.send_message(embed=simple_embed("⚠️ Đã Trừ Coin", f"Trừ {amount} coin của {user_id}\n💰 Số dư: {new_bal}", discord.Color.orange()))
+    await interaction.response.send_message(embed=simple_embed("⚠️ Đã Trừ Coin", f"Trừ {amount}<:lonelycoin:1421380256148750429> của {user_id}\n💰 Số dư: {new_bal}<:lonelycoin:1421380256148750429>", discord.Color.orange()))
 
     # LOG command
     user = f"{interaction.user.name}#{interaction.user.discriminator}"
@@ -711,7 +986,7 @@ async def setcoin(interaction: discord.Interaction, user_id: str, amount: int):
         return
     
     set_balance(user_id, amount)
-    await interaction.response.send_message(embed=simple_embed("🔧 Đặt Coin", f"Số dư của {user_id} = {amount} coin", discord.Color.blue()))
+    await interaction.response.send_message(embed=simple_embed("🔧 Đặt Coin", f"Số dư của {user_id} = {amount}<:lonelycoin:1421380256148750429>", discord.Color.blue()))
     
     # LOG command
     user = f"{interaction.user.name}#{interaction.user.discriminator}"
@@ -918,7 +1193,7 @@ async def balance(ctx):
         return
     
     balance_amount = get_balance(ctx.author.id)
-    embed = discord.Embed(title="💳 Số dư", description=f"{ctx.author.mention}, bạn có **{balance_amount}** credits.", color=discord.Color.green())
+    embed = discord.Embed(title="💳 Số dư", description=f"{ctx.author.mention}, bạn có **{balance_amount}**<:lonelycoin:1421380256148750429>.", color=discord.Color.green())
     await ctx.send(embed=embed)
     
     user = f"{ctx.author.name}#{ctx.author.discriminator}"
@@ -926,7 +1201,7 @@ async def balance(ctx):
     log_command(user, "!balance", guild_name, "Text Command")
     await send_dm_notification(user, "!balance", guild_name, "Text Command")
 
-@bot.tree.command(name="balance", description="Xem số dư credits của bạn")
+@bot.tree.command(name="balance", description="Xem số dư của bạn")
 async def balance_slash(interaction: discord.Interaction):
     if is_user_banned(interaction.user.id):
         embed = discord.Embed(title="❌ Bị cấm", description="Bạn đã bị cấm sử dụng bot này!", color=discord.Color.red())
@@ -934,7 +1209,7 @@ async def balance_slash(interaction: discord.Interaction):
         return
     
     balance_amount = get_balance(interaction.user.id)
-    embed = discord.Embed(title="💳 Số dư", description=f"{interaction.user.mention}, bạn có **{balance_amount}** credits.", color=discord.Color.green())
+    embed = discord.Embed(title="💳 Số dư", description=f"{interaction.user.mention}, bạn có **{balance_amount}**<:lonelycoin:1421380256148750429>.", color=discord.Color.green())
     await interaction.response.send_message(embed=embed, ephemeral=True)
     
     user = f"{interaction.user.name}#{interaction.user.discriminator}"
@@ -970,7 +1245,7 @@ async def daily(ctx):
     
     embed = discord.Embed(
         title="🎁 Daily Reward",
-        description=f"{ctx.author.mention} nhận **100 credits**\n⏰ Thời gian: {datetime.datetime.now().strftime('%H:%M:%S %d/%m/%Y')}",
+        description=f"{ctx.author.mention} đã nhận **100<:lonelycoin:1421380256148750429>**\n⏰ Thời gian: {datetime.datetime.now().strftime('%H:%M:%S %d/%m/%Y')}",
         color=discord.Color.gold()
     )
     await ctx.send(embed=embed)
@@ -980,7 +1255,7 @@ async def daily(ctx):
     log_command(user, "!daily", guild_name, "Text Command")
     await send_dm_notification(user, "!daily", guild_name, "Text Command")
 
-@bot.tree.command(name="daily", description="Nhận 100 credits mỗi ngày")
+@bot.tree.command(name="daily", description="Nhận 100 coins mỗi ngày")
 async def daily_slash(interaction: discord.Interaction):
     if is_user_banned(interaction.user.id):
         embed = discord.Embed(title="❌ Bị cấm", description="Bạn đã bị cấm sử dụng bot này!", color=discord.Color.red())
@@ -1008,7 +1283,7 @@ async def daily_slash(interaction: discord.Interaction):
     
     embed = discord.Embed(
         title="🎁 Daily Reward",
-        description=f"{interaction.user.mention} nhận **100 credits**\n⏰ Thời gian: {datetime.datetime.now().strftime('%H:%M:%S %d/%m/%Y')}",
+        description=f"{interaction.user.mention} nhận **100<:lonelycoin:1421380256148750429>**\n⏰ Thời gian: {datetime.datetime.now().strftime('%H:%M:%S %d/%m/%Y')}",
         color=discord.Color.gold()
     )
     await interaction.response.send_message(embed=embed, ephemeral=True)
@@ -1056,7 +1331,7 @@ async def work(ctx):
     
     embed = discord.Embed(
         title="💼 Làm việc",
-        description=f"{ctx.author.mention} làm việc kiếm được **{earn}** credits\n📊 Lần work: {work_count + 1}/5\n⏰ Thời gian: {datetime.datetime.now().strftime('%H:%M:%S %d/%m/%Y')}",
+        description=f"{ctx.author.mention} làm việc kiếm được **{earn}**<:lonelycoin:1421380256148750429>\n📊 Lần work: {work_count + 1}/5\n⏰ Thời gian: {datetime.datetime.now().strftime('%H:%M:%S %d/%m/%Y')}",
         color=discord.Color.blue()
     )
     await ctx.send(embed=embed)
@@ -1104,7 +1379,7 @@ async def work_slash(interaction: discord.Interaction):
     
     embed = discord.Embed(
         title="💼 Làm việc",
-        description=f"{interaction.user.mention} đã làm việc và kiếm được **{earn}** credits\n📊 Lần work: {work_count + 1}/5\n⏰ Thời gian: {datetime.datetime.now().strftime('%H:%M:%S %d/%m/%Y')}",
+        description=f"{interaction.user.mention} đã làm việc và kiếm được **{earn}**<:lonelycoin:1421380256148750429>\n📊 Lần work: {work_count + 1}/5\n⏰ Thời gian: {datetime.datetime.now().strftime('%H:%M:%S %d/%m/%Y')}",
         color=discord.Color.blue()
     )
     await interaction.response.send_message(embed=embed, ephemeral=True)
@@ -1122,19 +1397,19 @@ async def gamble(ctx, amount: int):
         return
     
     if amount <= 0:
-        embed = discord.Embed(title="❌ Lỗi", description="Số credits phải lớn hơn 0!", color=discord.Color.red())
+        embed = discord.Embed(title="❌ Lỗi", description="Số <:lonelycoin:1421380256148750429> phải lớn hơn 0!", color=discord.Color.red())
         return await ctx.send(embed=embed)
     
     if get_balance(ctx.author.id) < amount:
-        embed = discord.Embed(title="❌ Lỗi", description="Không đủ credits!", color=discord.Color.red())
+        embed = discord.Embed(title="❌ Lỗi", description="Không đủ <:lonelycoin:1421380256148750429>!", color=discord.Color.red())
         return await ctx.send(embed=embed)
     
     if random.random() < 0.5:
         remove_balance(ctx.author.id, amount)
-        embed = discord.Embed(title="💥 Thua", description=f"Thua **{amount}** credits!", color=discord.Color.red())
+        embed = discord.Embed(title="💥 Thua", description=f"Thua **{amount}**<:lonelycoin:1421380256148750429>!", color=discord.Color.red())
     else:
         add_balance(ctx.author.id, amount)
-        embed = discord.Embed(title="🎉 Thắng", description=f"Thắng **{amount}** credits!", color=discord.Color.green())
+        embed = discord.Embed(title="🎉 Thắng", description=f"Thắng **{amount}**<:lonelycoin:1421380256148750429>!", color=discord.Color.green())
     
     await ctx.send(embed=embed)
     
@@ -1160,10 +1435,10 @@ async def gamble_slash(interaction: discord.Interaction, amount: int):
     
     if random.random() < 0.5:
         remove_balance(interaction.user.id, amount)
-        embed = discord.Embed(title="💥 Thua", description=f"Thua **{amount}** credits!", color=discord.Color.red())
+        embed = discord.Embed(title="💥 Thua", description=f"Thua **{amount}**<:lonelycoin:1421380256148750429>!", color=discord.Color.red())
     else:
         add_balance(interaction.user.id, amount)
-        embed = discord.Embed(title="🎉 Thắng", description=f"Thắng **{amount}** credits!", color=discord.Color.green())
+        embed = discord.Embed(title="🎉 Thắng", description=f"Thắng **{amount}**<:lonelycoin:1421380256148750429>!", color=discord.Color.green())
     
     await interaction.response.send_message(embed=embed, ephemeral=True)
     
@@ -1186,7 +1461,7 @@ async def guess(ctx, number: int):
     win = random.randint(1, 10)
     if number == win:
         add_balance(ctx.author.id, 200)
-        embed = discord.Embed(title="🎯 Đúng!", description=f"Số đúng là {win}! Bạn nhận **200 credits**.", color=discord.Color.green())
+        embed = discord.Embed(title="🎯 Đúng!", description=f"Số đúng là {win}! Bạn nhận **200**<:lonelycoin:1421380256148750429>.", color=discord.Color.green())
     else:
         embed = discord.Embed(title="❌ Sai!", description=f"Số đúng là {win}. Thử lại nhé!", color=discord.Color.red())
     
@@ -1211,7 +1486,7 @@ async def guess_slash(interaction: discord.Interaction, number: int):
     win = random.randint(1, 10)
     if number == win:
         add_balance(interaction.user.id, 200)
-        embed = discord.Embed(title="🎯 Đúng!", description=f"Số đúng là {win}! Bạn nhận **200 credits**.", color=discord.Color.green())
+        embed = discord.Embed(title="🎯 Đúng!", description=f"Số đúng là {win}! Bạn nhận **200**<:lonelycoin:1421380256148750429>.", color=discord.Color.green())
     else:
         embed = discord.Embed(title="❌ Sai!", description=f"Số đúng là {win}. Thử lại nhé!", color=discord.Color.red())
     
@@ -1230,11 +1505,11 @@ async def slot(ctx, amount: int):
         return
     
     if amount <= 0:
-        embed = discord.Embed(title="❌ Lỗi", description="Số credits phải lớn hơn 0!", color=discord.Color.red())
+        embed = discord.Embed(title="❌ Lỗi", description="Số <:lonelycoin:1421380256148750429> phải lớn hơn 0!", color=discord.Color.red())
         return await ctx.send(embed=embed)
     
     if get_balance(ctx.author.id) < amount:
-        embed = discord.Embed(title="❌ Lỗi", description="Không đủ credits!", color=discord.Color.red())
+        embed = discord.Embed(title="❌ Lỗi", description="Không đủ <:lonelycoin:1421380256148750429>!", color=discord.Color.red())
         return await ctx.send(embed=embed)
     
     symbols = ["🍒", "🍋", "🍉", "⭐", "💎"]
@@ -1244,13 +1519,13 @@ async def slot(ctx, amount: int):
     
     if len(set(result)) == 1:
         add_balance(ctx.author.id, amount * 5)
-        embed.add_field(name="🎰 JACKPOT!", value=f"Bạn nhận **{amount * 5}** credits!", inline=False)
+        embed.add_field(name="🎰 JACKPOT!", value=f"Bạn nhận **{amount * 5}**<:lonelycoin:1421380256148750429>!", inline=False)
     elif len(set(result)) == 2:
         add_balance(ctx.author.id, amount * 2)
-        embed.add_field(name="🎰 Trúng nhỏ!", value=f"Bạn nhận **{amount * 2}** credits!", inline=False)
+        embed.add_field(name="🎰 Trúng nhỏ!", value=f"Bạn nhận **{amount * 2}**<:lonelycoin:1421380256148750429>!", inline=False)
     else:
         remove_balance(ctx.author.id, amount)
-        embed.add_field(name="🎰 Thua!", value=f"Mất **{amount}** credits!", inline=False)
+        embed.add_field(name="🎰 Thua!", value=f"Mất **{amount}**<:lonelycoin:1421380256148750429>!", inline=False)
     
     await ctx.send(embed=embed)
     
@@ -1267,11 +1542,11 @@ async def slot_slash(interaction: discord.Interaction, amount: int):
         return
     
     if amount <= 0:
-        embed = discord.Embed(title="❌ Lỗi", description="Số credits phải lớn hơn 0!", color=discord.Color.red())
+        embed = discord.Embed(title="❌ Lỗi", description="Số <:lonelycoin:1421380256148750429> phải lớn hơn 0!", color=discord.Color.red())
         return await interaction.response.send_message(embed=embed, ephemeral=True)
     
     if get_balance(interaction.user.id) < amount:
-        embed = discord.Embed(title="❌ Lỗi", description="Không đủ credits!", color=discord.Color.red())
+        embed = discord.Embed(title="❌ Lỗi", description="Không đủ <:lonelycoin:1421380256148750429>!", color=discord.Color.red())
         return await interaction.response.send_message(embed=embed, ephemeral=True)
     
     symbols = ["🍒", "🍋", "🍉", "⭐", "💎"]
@@ -1281,13 +1556,13 @@ async def slot_slash(interaction: discord.Interaction, amount: int):
     
     if len(set(result)) == 1:
         add_balance(interaction.user.id, amount * 5)
-        embed.add_field(name="🎰 JACKPOT!", value=f"Bạn nhận **{amount * 5}** credits!", inline=False)
+        embed.add_field(name="🎰 JACKPOT!", value=f"Bạn nhận **{amount * 5}**<:lonelycoin:1421380256148750429>!", inline=False)
     elif len(set(result)) == 2:
         add_balance(interaction.user.id, amount * 2)
-        embed.add_field(name="🎰 Trúng nhỏ!", value=f"Bạn nhận **{amount * 2}** credits!", inline=False)
+        embed.add_field(name="🎰 Trúng nhỏ!", value=f"Bạn nhận **{amount * 2}**<:lonelycoin:1421380256148750429>!", inline=False)
     else:
         remove_balance(interaction.user.id, amount)
-        embed.add_field(name="🎰 Thua!", value=f"Mất **{amount}** credits!", inline=False)
+        embed.add_field(name="🎰 Thua!", value=f"Mất **{amount}**<:lonelycoin:1421380256148750429>!", inline=False)
     
     await interaction.response.send_message(embed=embed, ephemeral=True)
     
@@ -1308,7 +1583,7 @@ async def shop(ctx):
     
     for role_id, item in shop_data.items():
         embed.add_field(
-            name=f"🛒 {item['name']} - {item['price']} credits",
+            name=f"🛒 {item['name']} - {item['price']}<:lonelycoin:1421380256148750429>",
             value=f"{item['description']}",
             inline=False
         )
@@ -1321,6 +1596,73 @@ async def shop(ctx):
     log_command(user, "!shop", guild_name, "Text Command")
     await send_dm_notification(user, "!shop", guild_name, "Text Command")
 
+class ScriptDropdown(discord.ui.Select):
+    def __init__(self, script_data):
+        options = []
+        for key, item in script_data.items():
+            options.append(
+                discord.SelectOption(
+                    label=item["name"],
+                    value=key
+                )
+            )
+
+        super().__init__(
+            placeholder="📜 Chọn script để xem...",
+            min_values=1, max_values=1,
+            options=options
+        )
+        self.script_data = script_data
+
+    async def callback(self, interaction: discord.Interaction):
+        script_key = self.values[0]
+        script = self.script_data[script_key]
+
+        # ✅ Chỉnh sửa tin nhắn thành code block text, không dùng embed
+        content = f"{script['loader']}"
+        await interaction.response.edit_message(content=content, embed=None, view=None)
+
+
+class ScriptView(discord.ui.View):
+    def __init__(self, script_data):
+        super().__init__(timeout=60)
+        self.add_item(ScriptDropdown(script_data))
+
+
+@bot.tree.command(name="script", description="Xem danh sách script")
+async def script_slash(interaction: discord.Interaction):
+    file_path = os.path.join(DATA_DIR, "listscript.json")
+    if is_user_banned(interaction.user.id):
+        embed = discord.Embed(title="❌ Bị cấm", description="Bạn đã bị cấm sử dụng bot này!", color=discord.Color.red())
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        return
+        
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            script_data = json.load(f)
+    except Exception as e:
+        return await interaction.response.send_message(
+            embed=discord.Embed(
+                title="❌ Lỗi",
+                description=f"Không đọc được file `listscript.json`\n```{e}```",
+                color=discord.Color.red()
+            ),
+            ephemeral=True
+        )
+
+    embed = discord.Embed(
+        title="📜 Script List",
+        description="Chọn script bạn muốn từ menu bên dưới:",
+        color=discord.Color.blue()
+    )
+    view = ScriptView(script_data)
+    await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+       
+    user = f"{interaction.user.name}#{interaction.user.discriminator}"
+    guild_name = interaction.guild.name if interaction.guild else "Direct Message"
+    log_command(user, "/script", guild_name, "Slash Command")
+    await send_dm_notification(user, "/script", guild_name, "Slash Command")
+
 @bot.tree.command(name="shop", description="Xem cửa hàng")
 async def shop_slash(interaction: discord.Interaction):
     if is_user_banned(interaction.user.id):
@@ -1332,7 +1674,7 @@ async def shop_slash(interaction: discord.Interaction):
     
     for role_id, item in shop_data.items():
         embed.add_field(
-            name=f"🛒 {item['name']} - {item['price']} credits",
+            name=f"🛒 {item['name']} - {item['price']}<:lonelycoin:1421380256148750429>",
             value=f"{item['description']}",
             inline=False
         )
@@ -1345,59 +1687,145 @@ async def shop_slash(interaction: discord.Interaction):
     log_command(user, "/shop", guild_name, "Slash Command")
     await send_dm_notification(user, "/shop", guild_name, "Slash Command")
 
-@bot.tree.command(name="buy", description="Mua item từ cửa hàng")
-@app_commands.choices(item=[
-    app_commands.Choice(name="VIP Role - 10000 credits", value="vip"),
-    app_commands.Choice(name="Vip+ Role - 50000 credits", value="vipplus"),
-    app_commands.Choice(name="Vip++ Role - 70000 credits", value="vipplusplus"),
-    app_commands.Choice(name="MVP Role - 100000 credits", value="mvp"),
-    app_commands.Choice(name="MVP+ Role - 150000 credits", value="mvpplus"),
-    app_commands.Choice(name="MVP++ Role - 300000 credits", value="mvpplusplus"),
-    app_commands.Choice(name="Manager Role - 999999999999 credits", value="managerbot")
-])
-async def buy_slash(interaction: discord.Interaction, item: app_commands.Choice[str]):
-    if is_user_banned(interaction.user.id):
-        embed = discord.Embed(title="❌ Bị cấm", description="Bạn đã bị cấm sử dụng bot này!", color=discord.Color.red())
-        await interaction.response.send_message(embed=embed, ephemeral=True)
-        return
-    
-    item_data = shop_data.get(item.value)
-    if not item_data:
-        embed = discord.Embed(title="❌ Lỗi", description="Item không tồn tại!", color=discord.Color.red())
-        await interaction.response.send_message(embed=embed, ephemeral=True)
-        return
-    
-    price = item_data['price']
-    role_id = item_data['role_id']
-    
-    if get_balance(interaction.user.id) < price:
-        embed = discord.Embed(title="❌ Không đủ credits", description=f"Bạn cần {price} credits để mua {item_data['name']}!", color=discord.Color.red())
-        await interaction.response.send_message(embed=embed, ephemeral=True)
-        return
-    
-    role = interaction.guild.get_role(role_id)
-    if not role:
-        embed = discord.Embed(title="❌ Lỗi", description="Role không tồn tại trong server!", color=discord.Color.red())
-        await interaction.response.send_message(embed=embed, ephemeral=True)
-        return
-    
-    if role in interaction.user.roles:
-        embed = discord.Embed(title="❌ Đã có role", description=f"Bạn đã có role {item_data['name']} rồi!", color=discord.Color.red())
-        await interaction.response.send_message(embed=embed, ephemeral=True)
-        return
-    
-    if remove_balance(interaction.user.id, price):
+def extract_name_and_emoji(item_name: str):
+    """
+    Tách emoji custom + tên role từ item['name']
+    VD: "<:vip:1421359862780264489> VIP Role"
+    """
+    match = re.match(r"<:(\w+):(\d+)> ?(.*)", item_name)
+    if match:
+        emoji_name, emoji_id, label = match.groups()
+        return discord.PartialEmoji(name=emoji_name, id=int(emoji_id)), label
+    return None, item_name
+
+
+class BuyDropdown(discord.ui.Select):
+    def __init__(self, shop_data):
+        options = []
+        for key, item in shop_data.items():
+            emoji, label = extract_name_and_emoji(item["name"])
+            options.append(
+                discord.SelectOption(
+                    label=label,
+                    description=f"{item['price']} coins",
+                    value=key,
+                    emoji=emoji
+                )
+            )
+
+        super().__init__(
+            placeholder="🛒 Chọn item muốn mua...",
+            min_values=1, max_values=1,
+            options=options
+        )
+        self.shop_data = shop_data
+
+    async def callback(self, interaction: discord.Interaction):
+        item_key = self.values[0]
+        item = self.shop_data[item_key]
+
+        embed = discord.Embed(
+            title="🛒 Xác nhận mua hàng",
+            description=f"Bạn có muốn mua **{item['name']}** với giá **{item['price']}<:lonelycoin:1421380256148750429> không**?",
+            color=discord.Color.blue()
+        )
+        view = ConfirmBuyView(item_key, item)
+        await interaction.response.edit_message(embed=embed, view=view)
+
+
+class ConfirmBuyView(discord.ui.View):
+    def __init__(self, item_key, item):
+        super().__init__(timeout=60)
+        self.item_key = item_key
+        self.item = item
+
+    @discord.ui.button(label="Mua", style=discord.ButtonStyle.green)
+    async def confirm(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if is_user_banned(interaction.user.id):
+            embed = discord.Embed(title="❌ Bị cấm", description="Bạn đã bị cấm sử dụng bot này!", color=discord.Color.red())
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+            return
+        
+        if get_balance(interaction.user.id) < self.item["price"]:
+            return await interaction.response.send_message(
+                embed=discord.Embed(
+                    title="❌ Không đủ coins",
+                    description="Bạn không có đủ <:lonelycoin:1421380256148750429> để mua!",
+                    color=discord.Color.red()
+                ),
+                ephemeral=True
+            )
+
+        role = interaction.guild.get_role(self.item["role_id"])
+        if not role:
+            return await interaction.response.send_message(
+                embed=discord.Embed(title="❌ Lỗi", description="Role không tồn tại!", color=discord.Color.red()),
+                ephemeral=True
+            )
+
+        if role in interaction.user.roles:
+            return await interaction.response.send_message(
+                embed=discord.Embed(title="❌ Lỗi", description="Bạn đã có vật phẩm này rồi!", color=discord.Color.red()),
+                ephemeral=True
+            )
+
+        # ✅ Trừ coin + add role
+        remove_balance(interaction.user.id, self.item["price"])
         await interaction.user.add_roles(role)
-        embed = discord.Embed(title="✅ Mua thành công", description=f"Đã mua {item_data['name']} với {price} credits!", color=discord.Color.green())
-        await interaction.response.send_message(embed=embed, ephemeral=True)
-    else:
-        embed = discord.Embed(title="❌ Lỗi", description="Không thể thực hiện giao dịch!", color=discord.Color.red())
-        await interaction.response.send_message(embed=embed, ephemeral=True)
-    
+
+        await interaction.response.edit_message(
+            embed=discord.Embed(
+                title="✅ Mua thành công",
+                description=f"Bạn đã mua **{self.item['name']}** với giá <:lonelycoin:1421380256148750429>!",
+                color=discord.Color.green()
+            ),
+            view=None
+        )
+
+        # 🔥 Log giao dịch
+        user = f"{interaction.user.name}#{interaction.user.discriminator}"
+        guild_name = interaction.guild.name if interaction.guild else "Direct Message"
+        log_command(user, f"/buy", guild_name, "Slash Command")
+        await send_dm_notification(user, f"/buy", guild_name, "Slash Command")
+
+    @discord.ui.button(label="Đóng", style=discord.ButtonStyle.red)
+    async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.edit_message(
+            embed=discord.Embed(
+                title="❌ Đã huỷ",
+                description="Bạn đã huỷ giao dịch.",
+                color=discord.Color.red()
+            ),
+            view=None
+        )
+
+
+class BuyView(discord.ui.View):
+    def __init__(self, shop_data):
+        super().__init__(timeout=60)
+        self.add_item(BuyDropdown(shop_data))
+
+
+@bot.tree.command(name="buy", description="Mua item từ cửa hàng")
+async def buy_slash(interaction: discord.Interaction):
+    if is_user_banned(interaction.user.id):
+        return await interaction.response.send_message(
+            embed=discord.Embed(title="❌ Bị cấm", description="Bạn đã bị cấm sử dụng bot!", color=discord.Color.red()),
+            ephemeral=True
+        )
+
+    embed = discord.Embed(
+        title="🏪 Cửa hàng",
+        description="Chọn item bạn muốn mua từ menu bên dưới:",
+        color=discord.Color.blue()
+    )
+    view = BuyView(shop_data)
+    await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+            
     user = f"{interaction.user.name}#{interaction.user.discriminator}"
     guild_name = interaction.guild.name if interaction.guild else "Direct Message"
     log_command(user, f"/buy {item.value}", guild_name, "Slash Command")
-    await send_dm_notification(user, f"/buy {item.value}", guild_name, "Slash Command")
+    await send_dm_notification(user, f"/buy ({item.value})", guild_name, "Slash Command")
 
 # ====== LEVEL COMMANDS ======
 @bot.command()
@@ -1445,19 +1873,19 @@ async def rank_slash(interaction: discord.Interaction, member: discord.Member = 
     await send_dm_notification(user, "/rank", guild_name, "Slash Command")
 
 @bot.command()
-async def leaderboard(ctx, type: str = "credits"):
+async def leaderboard(ctx, type: str = "coins"):
     if is_user_banned(ctx.author.id):
         embed = discord.Embed(title="❌ Bị cấm", description="Bạn đã bị cấm sử dụng bot này!", color=discord.Color.red())
         await ctx.send(embed=embed)
         return
     
-    if type == "credits":
+    if type == "coins":
         top = sorted(credits.items(), key=lambda x: x[1], reverse=True)[:10]
-        embed = discord.Embed(title="🏅 Top 10 Credits", color=discord.Color.gold())
+        embed = discord.Embed(title="🏅 Top 10 Coins", color=discord.Color.gold())
         for i, (uid, amt) in enumerate(top, 1):
             user = ctx.guild.get_member(int(uid))
             name = user.display_name if user else f"User {uid}"
-            embed.add_field(name=f"{i}. {name}", value=f"{amt} credits", inline=False)
+            embed.add_field(name=f"{i}. {name}", value=f"{amt} <:lonelycoin:1421380256148750429>", inline=False)
     elif type == "level":
         top = sorted(levels.items(), key=lambda x: x[1].get("level", 1), reverse=True)[:10]
         embed = discord.Embed(title="🏅 Top 10 Levels", color=discord.Color.gold())
@@ -1475,10 +1903,10 @@ async def leaderboard(ctx, type: str = "credits"):
     log_command(user, f"!leaderboard {type}", guild_name, "Text Command")
     await send_dm_notification(user, f"!leaderboard {type}", guild_name, "Text Command")
 
-@bot.tree.command(name="leaderboard", description="Xem bảng xếp hạng credits hoặc level")
+@bot.tree.command(name="leaderboard", description="Xem bảng xếp hạng coins hoặc level")
 @app_commands.describe(type="Chọn loại bảng xếp hạng")
 @app_commands.choices(type=[
-    app_commands.Choice(name="Credits", value="credits"),
+    app_commands.Choice(name="Coins", value="coins"),
     app_commands.Choice(name="Level", value="level")
 ])
 async def leaderboard_slash(interaction: discord.Interaction, type: app_commands.Choice[str]):
@@ -1494,16 +1922,16 @@ async def leaderboard_slash(interaction: discord.Interaction, type: app_commands
     # Dùng value từ dropdown
     type = type.value  
 
-    if type == "credits":
+    if type == "coins":
         top = sorted(credits.items(), key=lambda x: x[1], reverse=True)[:10]
-        embed = discord.Embed(title="🏅 Top 10 Credits", color=discord.Color.gold())
+        embed = discord.Embed(title="🏅 Top 10 Coins", color=discord.Color.gold())
         for i, (uid, amt) in enumerate(top, 1):
             try:
                 user = await bot.fetch_user(int(uid))
                 name = user.name
             except:
                 name = f"User {uid}"
-            embed.add_field(name=f"{i}. {name}", value=f"{amt} credits", inline=False)
+            embed.add_field(name=f"{i}. {name}", value=f"{amt} <:lonelycoin:1421380256148750429>", inline=False)
 
     elif type == "level":
         top = sorted(levels.items(), key=lambda x: x[1].get("level", 1), reverse=True)[:10]
