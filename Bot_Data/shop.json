@@ -1,0 +1,44 @@
+{
+    "vip": {
+        "price": 10000,
+        "role_id": 1420718498530721864,
+        "name": "VIP Role",
+        "description": "Receive the VIP Rank on the Lonely Hub Script, Lonely Hub Forums, and Lonely Hub Discord."
+    },
+    "vipplus": {
+        "price": 50000,
+        "role_id": 1420718386786340977,
+        "name": "Vip+ Role",
+        "description": "Receive the VIP+ Rank on the Lonely Hub Script, Lonely Hub Forums, and Lonely Hub Discord."
+    },
+    "vipplusplus": {
+        "price": 70000,
+        "role_id": 1421143311900479588,
+        "name": "Vip++ Role",
+        "description": "Receive the VIP++ Rank on the Lonely Hub Script, Lonely Hub Forums, and Lonely Hub Discord."
+    },
+    "mvp": {
+        "price": 100000,
+        "role_id": 1421143426795307018,
+        "name": "MVP Role",
+        "description": "Receive the MVP Rank on the Lonely Hub Script, Lonely Hub Forums, and Lonely Hub Discord."
+    },
+    "mvpplus": {
+        "price": 150000,
+        "role_id": 1421143520034426971,
+        "name": "MVP+ Role",
+        "description": "Receive the MVP+ Rank on the Lonely Hub Script, Lonely Hub Forums, and Lonely Hub Discord."
+    },
+    "mvpplusplus": {
+        "price": 300000,
+        "role_id": 1421143612543991900,
+        "name": "MVP++ Role",
+        "description": "Receive the MVP++ Rank on the Lonely Hub Script, Lonely Hub Forums, and Lonely Hub Discord."
+    },
+    "managerbot": {
+        "price": 999999999999,
+        "role_id": 1410600949646364702,
+        "name": "Manager Role",
+        "description": "Receive the Manager Rank on the Lonely Hub Script, Lonely Hub Forums, and Lonely Hub Discord."
+    }
+}
