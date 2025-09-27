@@ -63,6 +63,10 @@
 
 • `shop` - See what the shop sells
 
+• `tag` - The tag system in the name is similar to the Minecraft server hypixel
+
+• `resettag` - Remove all tag from name
+
 • `taixiu` - Play Sic bo game
 
 • `lichsutaixiu` - View the history of the last 5 Sic Bo games
