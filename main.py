@@ -11,17 +11,20 @@
 #                                                                                                                                                                                             #
 # ========================================Code===========================================
 
-import discord
-from discord.ext import commands
-from discord import app_commands
-import datetime
 import os
-import asyncio
-import pytz
 import json
+import asyncio
+import random
+import datetime
+import itertools
+from pathlib import Path
+import discord
+from discord import FFmpegPCMAudio, app_commands
+from discord.ext import commands, tasks
+import yt_dlp as youtube_dl
+import pytz
 from colorama import Fore, Style, init
 init(autoreset=True)
-import itertools
 
 # Màu rainbow chroma
 colors = [Fore.RED, Fore.YELLOW, Fore.GREEN, Fore.CYAN, Fore.BLUE, Fore.MAGENTA]
@@ -55,6 +58,13 @@ DATA_DIR = os.path.join(BASE_DIR, "Bot_Data")
 # Tên file
 WHITELIST_FILE = os.path.join(DATA_DIR, "whitelist_users.json")
 BANNED_FILE    = os.path.join(DATA_DIR, "blacklist_users.json")
+DATA_FILE = Path(os.path.join(DATA_DIR, "data.json"))
+LEVEL_FILE = Path(os.path.join(DATA_DIR, "levels.json"))
+REACTION_FILE = Path(os.path.join(DATA_DIR, "reaction_roles.json"))
+SHOP_FILE = Path(os.path.join(DATA_DIR, "shop.json"))
+DAILY_FILE = Path(os.path.join(DATA_DIR, "daily_login.json"))
+WORK_FILE = Path(os.path.join(DATA_DIR, "work.json"))
+TAIXIU_HISTORY_FILE = Path(os.path.join(DATA_DIR, "taixiu_history.json"))
 
 # Biến toàn cục
 ALLOWED_USERS = {}
@@ -118,6 +128,139 @@ def load_banned_users():
     except Exception as e:
         print(f"[ERROR] Không thể đọc {BANNED_FILE}: {e}")
         BANNED_USERS = {}
+        
+def load_json(file_path):
+    try:
+        if file_path.exists():
+            return json.loads(file_path.read_text(encoding='utf-8'))
+        return {}
+    except (json.JSONDecodeError, Exception):
+        return {}
+
+def save_json(data, file_path):
+    try:
+        file_path.write_text(json.dumps(data, indent=4, ensure_ascii=False), encoding='utf-8')
+    except Exception as e:
+        print(f"Lỗi khi lưu file {file_path}: {e}")
+
+# Tạo file shop mẫu nếu chưa có
+if not SHOP_FILE.exists():
+    default_shop = {
+        "vip": {"price": 10000, "role_id": 1420718498530721864, "name": "VIP Role", "description": "Receive the VIP Rank on the Lonely Hub Script, Lonely Hub Forums, and Lonely Hub Discord."},
+        "vipplus": {"price": 50000, "role_id": 1420718386786340977, "name": "Vip+ Role", "description": "Receive the VIP+ Rank on the Lonely Hub Script, Lonely Hub Forums, and Lonely Hub Discord."},
+        "vipplusplus": {"price": 70000, "role_id": 1421143311900479588, "name": "Vip++ Role", "description": "Receive the VIP+ Rank on the Lonely Hub Script, Lonely Hub Forums, and Lonely Hub Discord."},                                                         
+        "mvp": {"price": 100000, "role_id": 1421143426795307018, "name": "MVP Role", "description": "Receive the MVP Rank on the Lonely Hub Script, Lonely Hub Forums, and Lonely Hub Discord."},
+        "mvpplus": {"price": 150000, "role_id": 1421143520034426971, "name": "MVP+ Role", "description": "Receive the MVP+ Rank on the Lonely Hub Script, Lonely Hub Forums, and Lonely Hub Discord."},
+        "mvpplusplus": {"price": 300000, "role_id": 1421143612543991900, "name": "MVP++ Role", "description": "Receive the MVP++ Rank on the Lonely Hub Script, Lonely Hub Forums, and Lonely Hub Discord."},
+        "managerbot": {"price": 999999999999, "role_id": 1410600949646364702, "name": "Manager Role", "description": "Receive the Manager Rank on the Lonely Hub Script, Lonely Hub Forums, and Lonely Hub Discord."}
+    }
+    save_json(default_shop, SHOP_FILE)
+
+credits = load_json(DATA_FILE)
+levels = load_json(LEVEL_FILE)
+reaction_roles = load_json(REACTION_FILE)
+shop_data = load_json(SHOP_FILE)
+daily_data = load_json(DAILY_FILE)
+work_data = load_json(WORK_FILE)
+taixiu_history = load_json(TAIXIU_HISTORY_FILE)
+
+# ====== ECONOMY FUNCTIONS ======
+def get_balance(user_id):
+    return credits.get(str(user_id), 0)
+
+def add_balance(user_id, amount):
+    credits[str(user_id)] = get_balance(user_id) + amount
+    save_json(credits, DATA_FILE)
+
+def remove_balance(user_id, amount):
+    if get_balance(user_id) >= amount:
+        credits[str(user_id)] -= amount
+        save_json(credits, DATA_FILE)
+        return True
+    return False
+    
+def can_daily(user_id):
+    """Kiểm tra user có thể nhận daily không"""
+    user_id = str(user_id)
+    if user_id not in daily_data:
+        return True
+    
+    last_daily = datetime.datetime.fromisoformat(daily_data[user_id]["last_claimed"])
+    now = datetime.datetime.now()
+    return (now - last_daily).days >= 1
+
+def can_work(user_id):
+    """Kiểm tra user có thể work không"""
+    user_id = str(user_id)
+    if user_id not in work_data:
+        return True, 0
+    
+    last_work_date = datetime.datetime.fromisoformat(work_data[user_id]["last_date"]).date()
+    today = datetime.datetime.now().date()
+    
+    # Nếu khác ngày thì reset
+    if last_work_date != today:
+        work_data[user_id]["count"] = 0
+        work_data[user_id]["last_date"] = today.isoformat()
+        save_json(work_data, WORK_FILE)
+        return True, 0
+    
+    return work_data[user_id]["count"] < 5, work_data[user_id]["count"]
+
+def add_balance(user_id, amount):
+    user_id = str(user_id)
+    credits[user_id] = get_balance(user_id) + amount
+    save_json(credits, DATA_FILE)
+    return credits[user_id]  # 🔥 Trả về số dư mới
+    
+def remove_balance(user_id, amount):
+    user_id = str(user_id)
+    if get_balance(user_id) >= amount:
+        credits[user_id] -= amount
+        save_json(credits, DATA_FILE)
+        return credits[user_id]  # 🔥 Trả về số dư sau khi trừ
+    return None
+    
+def simple_embed(title: str, description: str, color: discord.Color = discord.Color.blue()):
+    """
+    Hàm tạo embed đơn giản để dùng lại nhiều lần
+    """
+    embed = discord.Embed(
+        title=title,
+        description=description,
+        color=color
+    )
+    return embed
+    
+def update_daily(user_id):
+    """Cập nhật thời gian daily"""
+    user_id = str(user_id)
+    now = datetime.datetime.now()
+    daily_data[user_id] = {
+        "last_claimed": now.isoformat(),
+        "date": now.strftime("%d/%m/%Y"),
+        "time": now.strftime("%H:%M:%S")
+    }
+    save_json(daily_data, DAILY_FILE)
+
+def update_work(user_id):
+    """Cập nhật số lần work"""
+    user_id = str(user_id)
+    today = datetime.datetime.now().date()
+    
+    if user_id not in work_data:
+        work_data[user_id] = {"count": 0, "last_date": today.isoformat()}
+    
+    # Nếu khác ngày thì reset
+    if datetime.datetime.fromisoformat(work_data[user_id]["last_date"]).date() != today:
+        work_data[user_id]["count"] = 0
+        work_data[user_id]["last_date"] = today.isoformat()
+    
+    work_data[user_id]["count"] += 1
+    work_data[user_id]["last_work"] = datetime.datetime.now().isoformat()
+    work_data[user_id]["date"] = datetime.datetime.now().strftime("%d/%m/%Y")
+    work_data[user_id]["time"] = datetime.datetime.now().strftime("%H:%M:%S")
+    save_json(work_data, WORK_FILE)
         
 # Cấu hình bot
 intents = discord.Intents.default()
@@ -198,6 +341,25 @@ def setup_logging():
     if not os.path.exists('Logs'):
         os.makedirs('Logs')
 
+def add_taixiu_history(user_id, dice, total, result, win, amount):
+    now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    status = "win" if win else "lose"
+    dice_str = f"{dice[0]},{dice[1]},{dice[2]}={total},{result.capitalize()}"
+
+    record = {
+        "time": now,
+        "result": f"{status},{dice_str}",
+        "amount": amount
+    }
+
+    user_id = str(user_id)
+    if user_id not in taixiu_history:
+        taixiu_history[user_id] = []
+    taixiu_history[user_id].insert(0, record)
+    taixiu_history[user_id] = taixiu_history[user_id][:5]
+    save_json(taixiu_history, TAIXIU_HISTORY_FILE)
+    
 def get_utc7_time():
     """Lấy thời gian hiện tại theo UTC+7"""
     now = datetime.datetime.now(UTC7)
@@ -397,6 +559,166 @@ async def bancmd(interaction: discord.Interaction, user_id: str, reason: str):
         )
         await interaction.response.send_message(embed=error_embed, ephemeral=True)
 
+@bot.tree.command(name="taixiu", description="Chơi Tài Xỉu")
+@app_commands.describe(select="Chọn Tài hoặc Xỉu", amount="Số coin bạn muốn cược")
+@app_commands.choices(select=[
+    app_commands.Choice(name="Tài", value="tai"),
+    app_commands.Choice(name="Xỉu", value="xiu")
+])
+async def taixiu(interaction: discord.Interaction, select: app_commands.Choice[str], amount: int):
+    # Kiểm tra bị cấm
+    if is_user_banned(interaction.user.id):
+        embed = discord.Embed(
+            title="❌ Bị cấm",
+            description="Bạn đã bị cấm sử dụng bot này!",
+            color=discord.Color.red()
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        return
+    
+    user_id = str(interaction.user.id)
+    bal = get_balance(user_id)
+    if bal < amount:
+        await interaction.response.send_message(
+            embed=simple_embed("❌ Không đủ coin", f"Bạn chỉ có {bal} coin", discord.Color.red()),
+            ephemeral=True
+        )
+        return
+        
+    # Tung xúc xắc
+    dice = [random.randint(1, 6) for _ in range(3)]
+    total = sum(dice)
+    result = "tai" if 11 <= total <= 17 else "xiu"
+
+    # ✅ Xử lý kết quả
+    win = (select.value == result)
+    if win:
+        add_balance(user_id, amount)
+        outcome_text = f"🎉 Bạn thắng {amount} coin!"
+        color = discord.Color.green()
+    else:
+        remove_balance(user_id, amount)
+        outcome_text = f"💀 Bạn thua {amount} coin!"
+        color = discord.Color.red()
+
+    # 🔥 Lưu lịch sử
+    add_taixiu_history(
+        interaction.user.id,
+        dice, total, result,
+        win, amount
+    )
+
+    # Embed kết quả
+    new_bal = get_balance(user_id)
+    e = discord.Embed(title="🎲 Kết Quả Tài Xỉu", color=color)
+    e.add_field(name="Xúc xắc", value=f"🎲 {dice[0]} • 🎲 {dice[1]} • 🎲 {dice[2]}", inline=False)
+    e.add_field(name="Tổng", value=f"{total} → {result.upper()}", inline=False)
+    e.add_field(name="Kết quả", value=outcome_text, inline=False)
+    e.set_footer(text=f"Số dư: {new_bal} coin")
+    e.set_author(name=str(interaction.user), icon_url=interaction.user.display_avatar.url)
+    await interaction.response.send_message(embed=e)
+    
+    # LOG command
+    user = f"{interaction.user.name}#{interaction.user.discriminator}"
+    guild_name = interaction.guild.name if interaction.guild else "Direct Message"
+    log_command(user, f"/taixiu {select.value} {amount}", guild_name, "Slash Command")
+    await send_dm_notification(user, f"/taixiu {select.value} {amount}", guild_name, "Slash Command")
+    
+@bot.tree.command(name="lichsutaixiu", description="Xem 5 trận gần nhất của bạn trong Tài Xỉu")
+async def lichsutaixiu(interaction: discord.Interaction):
+    user_id = str(interaction.user.id)
+
+    if user_id not in taixiu_history or len(taixiu_history[user_id]) == 0:
+        await interaction.response.send_message(
+            embed=simple_embed("📜 Lịch Sử Tài Xỉu", "Bạn chưa chơi ván nào!", discord.Color.orange()),
+            ephemeral=True
+        )
+        return
+
+    embed = discord.Embed(title="📜 Lịch Sử Tài Xỉu (5 trận gần nhất)", color=discord.Color.blue())
+
+    for rec in taixiu_history[user_id]:
+        time = rec["time"]
+        status, dice_str = rec["result"].split(",", 1)
+        amount = rec["amount"]
+
+        # Tách tiếp dice
+        dice_part = dice_str.split("=")[0]     # "1,3,2"
+        total_part = dice_str.split("=")[1]    # "6,Xiu"
+        total, result = total_part.split(",")
+
+        # Chuyển tiếng Việt
+        vn_status = "Thắng" if status == "win" else "Thua"
+        vn_result = "Tài" if result.lower() == "tai" else "Xỉu"
+
+        embed.add_field(
+            name=f"⏰ {time}",
+            value=f"{vn_status} {amount} coin\n🎲 {dice_part} = {total} → {vn_result}",
+            inline=False
+        )
+
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+    
+@bot.tree.command(name="addcoin", description="(Admin) Thêm coin cho user")
+async def addcoin(interaction: discord.Interaction, user_id: str, amount: int):
+    if not is_user_allowed(interaction.user.id):
+        embed = discord.Embed(
+            title="❌ Lỗi",
+            description="Bạn không có quyền sử dụng lệnh này!",
+            color=discord.Color.red()
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        return
+    
+    # LOG command
+    user = f"{interaction.user.name}#{interaction.user.discriminator}"
+    guild_name = interaction.guild.name if interaction.guild else "Direct Message"
+    log_command(user, f"/addcoin {user_id} {amount}", guild_name, "Slash Command")
+    await send_dm_notification(user, f"/addcoin {user_id} {amount}", guild_name, "Slash Command")
+    
+    new_bal = add_balance(user_id, amount)
+    await interaction.response.send_message(embed=simple_embed("✅ Đã Thêm Coin", f"Cộng {amount} coin cho {user_id}\n💰 Số dư: {new_bal}", discord.Color.green()))
+
+@bot.tree.command(name="removecoin", description="(Admin) Trừ coin của user")
+async def removecoin(interaction: discord.Interaction, user_id: str, amount: int):
+    if not is_user_allowed(interaction.user.id):
+        embed = discord.Embed(
+            title="❌ Lỗi",
+            description="Bạn không có quyền sử dụng lệnh này!",
+            color=discord.Color.red()
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        return
+        
+    new_bal = remove_balance(user_id, amount)
+    await interaction.response.send_message(embed=simple_embed("⚠️ Đã Trừ Coin", f"Trừ {amount} coin của {user_id}\n💰 Số dư: {new_bal}", discord.Color.orange()))
+
+    # LOG command
+    user = f"{interaction.user.name}#{interaction.user.discriminator}"
+    guild_name = interaction.guild.name if interaction.guild else "Direct Message"
+    log_command(user, f"/removecoin {user_id} {amount}", guild_name, "Slash Command")
+    await send_dm_notification(user, f"/removecoin {user_id} {amount}", guild_name, "Slash Command")
+    
+@bot.tree.command(name="setcoin", description="(Admin) Set coin cho user")
+async def setcoin(interaction: discord.Interaction, user_id: str, amount: int):
+    if not is_user_allowed(interaction.user.id):
+        embed = discord.Embed(
+            title="❌ Lỗi",
+            description="Bạn không có quyền sử dụng lệnh này!",
+            color=discord.Color.red()
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        return
+    
+    set_balance(user_id, amount)
+    await interaction.response.send_message(embed=simple_embed("🔧 Đặt Coin", f"Số dư của {user_id} = {amount} coin", discord.Color.blue()))
+    
+    # LOG command
+    user = f"{interaction.user.name}#{interaction.user.discriminator}"
+    guild_name = interaction.guild.name if interaction.guild else "Direct Message"
+    log_command(user, f"/setcoin {user_id} {amount}", guild_name, "Slash Command")
+    await send_dm_notification(user, f"/setcoin {user_id} {amount}", guild_name, "Slash Command")
+    
 # Slash Command - Unbancmd: Gỡ cấm người dùng
 @bot.tree.command(name="unbancmd", description="Gỡ cấm người dùng sử dụng bot")
 @app_commands.describe(
@@ -563,6 +885,1067 @@ async def addwhitelist(interaction: discord.Interaction, user_id: str, display_n
         )
         await interaction.response.send_message(embed=error_embed, ephemeral=True)
         
+@bot.event
+async def on_message(message):
+    if message.author.bot or not message.guild: 
+        return await bot.process_commands(message)
+    
+    user_id = str(message.author.id)
+    current_data = levels.get(user_id, {"xp": 0, "level": 1})
+    xp = current_data["xp"] + random.randint(5, 15)
+    level = current_data["level"]
+    
+    if xp >= level * 100:
+        xp -= level * 100
+        level += 1
+        embed = discord.Embed(
+            title="🎉 Level Up!",
+            description=f"{message.author.mention} đã lên level {level}!",
+            color=discord.Color.gold()
+        )
+        await message.channel.send(embed=embed)
+    
+    levels[user_id] = {"xp": xp, "level": level}
+    save_json(levels, LEVEL_FILE)
+    await bot.process_commands(message)
+
+# ====== ECONOMY COMMANDS ======
+@bot.command()
+async def balance(ctx):
+    if is_user_banned(ctx.author.id):
+        embed = discord.Embed(title="❌ Bị cấm", description="Bạn đã bị cấm sử dụng bot này!", color=discord.Color.red())
+        await ctx.send(embed=embed)
+        return
+    
+    balance_amount = get_balance(ctx.author.id)
+    embed = discord.Embed(title="💳 Số dư", description=f"{ctx.author.mention}, bạn có **{balance_amount}** credits.", color=discord.Color.green())
+    await ctx.send(embed=embed)
+    
+    user = f"{ctx.author.name}#{ctx.author.discriminator}"
+    guild_name = ctx.guild.name if ctx.guild else "Direct Message"
+    log_command(user, "!balance", guild_name, "Text Command")
+    await send_dm_notification(user, "!balance", guild_name, "Text Command")
+
+@bot.tree.command(name="balance", description="Xem số dư credits của bạn")
+async def balance_slash(interaction: discord.Interaction):
+    if is_user_banned(interaction.user.id):
+        embed = discord.Embed(title="❌ Bị cấm", description="Bạn đã bị cấm sử dụng bot này!", color=discord.Color.red())
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        return
+    
+    balance_amount = get_balance(interaction.user.id)
+    embed = discord.Embed(title="💳 Số dư", description=f"{interaction.user.mention}, bạn có **{balance_amount}** credits.", color=discord.Color.green())
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+    
+    user = f"{interaction.user.name}#{interaction.user.discriminator}"
+    guild_name = interaction.guild.name if interaction.guild else "Direct Message"
+    log_command(user, "/balance", guild_name, "Slash Command")
+    await send_dm_notification(user, "/balance", guild_name, "Slash Command")
+
+@bot.command()
+async def daily(ctx):
+    if is_user_banned(ctx.author.id):
+        embed = discord.Embed(title="❌ Bị cấm", description="Bạn đã bị cấm sử dụng bot này!", color=discord.Color.red())
+        await ctx.send(embed=embed)
+        return
+    
+    if not can_daily(ctx.author.id):
+        user_id = str(ctx.author.id)
+        last_claim = datetime.datetime.fromisoformat(daily_data[user_id]["last_claimed"])
+        next_claim = last_claim + datetime.timedelta(days=1)
+        wait_time = next_claim - datetime.datetime.now()
+        hours = int(wait_time.total_seconds() // 3600)
+        minutes = int((wait_time.total_seconds() % 3600) // 60)
+        
+        embed = discord.Embed(
+            title="❌ Đã nhận daily hôm nay",
+            description=f"Bạn có thể nhận lại sau {hours} giờ {minutes} phút\n⏰ Lần cuối: {daily_data[user_id]['time']} {daily_data[user_id]['date']}",
+            color=discord.Color.orange()
+        )
+        await ctx.send(embed=embed)
+        return
+    
+    add_balance(ctx.author.id, 100)
+    update_daily(ctx.author.id)
+    
+    embed = discord.Embed(
+        title="🎁 Daily Reward",
+        description=f"{ctx.author.mention} nhận **100 credits**\n⏰ Thời gian: {datetime.datetime.now().strftime('%H:%M:%S %d/%m/%Y')}",
+        color=discord.Color.gold()
+    )
+    await ctx.send(embed=embed)
+    
+    user = f"{ctx.author.name}#{ctx.author.discriminator}"
+    guild_name = ctx.guild.name if ctx.guild else "Direct Message"
+    log_command(user, "!daily", guild_name, "Text Command")
+    await send_dm_notification(user, "!daily", guild_name, "Text Command")
+
+@bot.tree.command(name="daily", description="Nhận 100 credits mỗi ngày")
+async def daily_slash(interaction: discord.Interaction):
+    if is_user_banned(interaction.user.id):
+        embed = discord.Embed(title="❌ Bị cấm", description="Bạn đã bị cấm sử dụng bot này!", color=discord.Color.red())
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        return
+    
+    if not can_daily(interaction.user.id):
+        user_id = str(interaction.user.id)
+        last_claim = datetime.datetime.fromisoformat(daily_data[user_id]["last_claimed"])
+        next_claim = last_claim + datetime.timedelta(days=1)
+        wait_time = next_claim - datetime.datetime.now()
+        hours = int(wait_time.total_seconds() // 3600)
+        minutes = int((wait_time.total_seconds() % 3600) // 60)
+        
+        embed = discord.Embed(
+            title="❌ Đã nhận daily hôm nay",
+            description=f"Bạn có thể nhận lại sau {hours} giờ {minutes} phút\n⏰ Lần cuối: {daily_data[user_id]['time']} {daily_data[user_id]['date']}",
+            color=discord.Color.orange()
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        return
+    
+    add_balance(interaction.user.id, 100)
+    update_daily(interaction.user.id)
+    
+    embed = discord.Embed(
+        title="🎁 Daily Reward",
+        description=f"{interaction.user.mention} nhận **100 credits**\n⏰ Thời gian: {datetime.datetime.now().strftime('%H:%M:%S %d/%m/%Y')}",
+        color=discord.Color.gold()
+    )
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+    
+    user = f"{interaction.user.name}#{interaction.user.discriminator}"
+    guild_name = interaction.guild.name if interaction.guild else "Direct Message"
+    log_command(user, "/daily", guild_name, "Slash Command")
+    await send_dm_notification(user, "/daily", guild_name, "Slash Command")
+    
+@bot.command()
+async def work(ctx):
+    if is_user_banned(ctx.author.id):
+        embed = discord.Embed(title="❌ Bị cấm", description="Bạn đã bị cấm sử dụng bot này!", color=discord.Color.red())
+        await ctx.send(embed=embed)
+        return
+    
+    can_work_result, work_count = can_work(ctx.author.id)
+    if not can_work_result:
+        embed = discord.Embed(
+            title="❌ Đã đạt giới hạn",
+            description=f"Bạn đã work {work_count}/5 lần hôm nay!\n⏰ Chờ đến ngày mai để reset.",
+            color=discord.Color.orange()
+        )
+        await ctx.send(embed=embed)
+        return
+    
+    # Kiểm tra cooldown 90 giây
+    user_id = str(ctx.author.id)
+    if user_id in work_data and "last_work" in work_data[user_id]:
+        last_work = datetime.datetime.fromisoformat(work_data[user_id]["last_work"])
+        cooldown = datetime.timedelta(seconds=90)
+        if datetime.datetime.now() - last_work < cooldown:
+            wait_seconds = int((cooldown - (datetime.datetime.now() - last_work)).total_seconds())
+            embed = discord.Embed(
+                title="⏳ Đang chờ cooldown",
+                description=f"Vui lòng chờ {wait_seconds} giây nữa!",
+                color=discord.Color.orange()
+            )
+            await ctx.send(embed=embed)
+            return
+    
+    earn = random.randint(50, 200)
+    add_balance(ctx.author.id, earn)
+    update_work(ctx.author.id)
+    
+    embed = discord.Embed(
+        title="💼 Làm việc",
+        description=f"{ctx.author.mention} làm việc kiếm được **{earn}** credits\n📊 Lần work: {work_count + 1}/5\n⏰ Thời gian: {datetime.datetime.now().strftime('%H:%M:%S %d/%m/%Y')}",
+        color=discord.Color.blue()
+    )
+    await ctx.send(embed=embed)
+    
+    user = f"{ctx.author.name}#{ctx.author.discriminator}"
+    guild_name = ctx.guild.name if ctx.guild else "Direct Message"
+    log_command(user, "!work", guild_name, "Text Command")
+    await send_dm_notification(user, "!work", guild_name, "Text Command")
+
+@bot.tree.command(name="work", description="Làm việc để kiếm credits")
+async def work_slash(interaction: discord.Interaction):
+    if is_user_banned(interaction.user.id):
+        embed = discord.Embed(title="❌ Bị cấm", description="Bạn đã bị cấm sử dụng bot này!", color=discord.Color.red())
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        return
+    
+    can_work_result, work_count = can_work(interaction.user.id)
+    if not can_work_result:
+        embed = discord.Embed(
+            title="❌ Đã đạt giới hạn",
+            description=f"Bạn đã work {work_count}/5 lần hôm nay!\n⏰ Chờ đến ngày mai để reset.",
+            color=discord.Color.orange()
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        return
+    
+    # Kiểm tra cooldown 90 giây
+    user_id = str(interaction.user.id)
+    if user_id in work_data and "last_work" in work_data[user_id]:
+        last_work = datetime.datetime.fromisoformat(work_data[user_id]["last_work"])
+        cooldown = datetime.timedelta(seconds=90)
+        if datetime.datetime.now() - last_work < cooldown:
+            wait_seconds = int((cooldown - (datetime.datetime.now() - last_work)).total_seconds())
+            embed = discord.Embed(
+                title="⏳ Đang chờ cooldown",
+                description=f"Vui lòng chờ {wait_seconds} giây nữa!",
+                color=discord.Color.orange()
+            )
+            await interaction.response.send_message(embed=embed, ephemeral=True)
+            return
+    
+    earn = random.randint(50, 200)
+    add_balance(interaction.user.id, earn)
+    update_work(interaction.user.id)
+    
+    embed = discord.Embed(
+        title="💼 Làm việc",
+        description=f"{interaction.user.mention} đã làm việc và kiếm được **{earn}** credits\n📊 Lần work: {work_count + 1}/5\n⏰ Thời gian: {datetime.datetime.now().strftime('%H:%M:%S %d/%m/%Y')}",
+        color=discord.Color.blue()
+    )
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+    
+    user = f"{interaction.user.name}#{interaction.user.discriminator}"
+    guild_name = interaction.guild.name if interaction.guild else "Direct Message"
+    log_command(user, "/work", guild_name, "Slash Command")
+    await send_dm_notification(user, "/work", guild_name, "Slash Command")
+    
+@bot.command()
+async def gamble(ctx, amount: int):
+    if is_user_banned(ctx.author.id):
+        embed = discord.Embed(title="❌ Bị cấm", description="Bạn đã bị cấm sử dụng bot này!", color=discord.Color.red())
+        await ctx.send(embed=embed)
+        return
+    
+    if amount <= 0:
+        embed = discord.Embed(title="❌ Lỗi", description="Số credits phải lớn hơn 0!", color=discord.Color.red())
+        return await ctx.send(embed=embed)
+    
+    if get_balance(ctx.author.id) < amount:
+        embed = discord.Embed(title="❌ Lỗi", description="Không đủ credits!", color=discord.Color.red())
+        return await ctx.send(embed=embed)
+    
+    if random.random() < 0.5:
+        remove_balance(ctx.author.id, amount)
+        embed = discord.Embed(title="💥 Thua", description=f"Thua **{amount}** credits!", color=discord.Color.red())
+    else:
+        add_balance(ctx.author.id, amount)
+        embed = discord.Embed(title="🎉 Thắng", description=f"Thắng **{amount}** credits!", color=discord.Color.green())
+    
+    await ctx.send(embed=embed)
+    
+    user = f"{ctx.author.name}#{ctx.author.discriminator}"
+    guild_name = ctx.guild.name if ctx.guild else "Direct Message"
+    log_command(user, f"!gamble {amount}", guild_name, "Text Command")
+    await send_dm_notification(user, f"!gamble {amount}", guild_name, "Text Command")
+
+@bot.tree.command(name="gamble", description="Cược credits (tỉ lệ thắng 50%)")
+async def gamble_slash(interaction: discord.Interaction, amount: int):
+    if is_user_banned(interaction.user.id):
+        embed = discord.Embed(title="❌ Bị cấm", description="Bạn đã bị cấm sử dụng bot này!", color=discord.Color.red())
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        return
+    
+    if amount <= 0:
+        embed = discord.Embed(title="❌ Lỗi", description="Số credits phải lớn hơn 0!", color=discord.Color.red())
+        return await interaction.response.send_message(embed=embed, ephemeral=True)
+    
+    if get_balance(interaction.user.id) < amount:
+        embed = discord.Embed(title="❌ Lỗi", description="Không đủ credits!", color=discord.Color.red())
+        return await interaction.response.send_message(embed=embed, ephemeral=True)
+    
+    if random.random() < 0.5:
+        remove_balance(interaction.user.id, amount)
+        embed = discord.Embed(title="💥 Thua", description=f"Thua **{amount}** credits!", color=discord.Color.red())
+    else:
+        add_balance(interaction.user.id, amount)
+        embed = discord.Embed(title="🎉 Thắng", description=f"Thắng **{amount}** credits!", color=discord.Color.green())
+    
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+    
+    user = f"{interaction.user.name}#{interaction.user.discriminator}"
+    guild_name = interaction.guild.name if interaction.guild else "Direct Message"
+    log_command(user, f"/gamble {amount}", guild_name, "Slash Command")
+    await send_dm_notification(user, f"/gamble {amount}", guild_name, "Slash Command")
+
+@bot.command()
+async def guess(ctx, number: int):
+    if is_user_banned(ctx.author.id):
+        embed = discord.Embed(title="❌ Bị cấm", description="Bạn đã bị cấm sử dụng bot này!", color=discord.Color.red())
+        await ctx.send(embed=embed)
+        return
+    
+    if number < 1 or number > 10:
+        embed = discord.Embed(title="❌ Lỗi", description="Chọn số từ 1 đến 10!", color=discord.Color.red())
+        return await ctx.send(embed=embed)
+    
+    win = random.randint(1, 10)
+    if number == win:
+        add_balance(ctx.author.id, 200)
+        embed = discord.Embed(title="🎯 Đúng!", description=f"Số đúng là {win}! Bạn nhận **200 credits**.", color=discord.Color.green())
+    else:
+        embed = discord.Embed(title="❌ Sai!", description=f"Số đúng là {win}. Thử lại nhé!", color=discord.Color.red())
+    
+    await ctx.send(embed=embed)
+    
+    user = f"{ctx.author.name}#{ctx.author.discriminator}"
+    guild_name = ctx.guild.name if ctx.guild else "Direct Message"
+    log_command(user, f"!guess {number}", guild_name, "Text Command")
+    await send_dm_notification(user, f"!guess {number}", guild_name, "Text Command")
+
+@bot.tree.command(name="guess", description="Đoán số từ 1-10 để nhận 200 credits")
+async def guess_slash(interaction: discord.Interaction, number: int):
+    if is_user_banned(interaction.user.id):
+        embed = discord.Embed(title="❌ Bị cấm", description="Bạn đã bị cấm sử dụng bot này!", color=discord.Color.red())
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        return
+    
+    if number < 1 or number > 10:
+        embed = discord.Embed(title="❌ Lỗi", description="Chọn số từ 1 đến 10!", color=discord.Color.red())
+        return await interaction.response.send_message(embed=embed, ephemeral=True)
+    
+    win = random.randint(1, 10)
+    if number == win:
+        add_balance(interaction.user.id, 200)
+        embed = discord.Embed(title="🎯 Đúng!", description=f"Số đúng là {win}! Bạn nhận **200 credits**.", color=discord.Color.green())
+    else:
+        embed = discord.Embed(title="❌ Sai!", description=f"Số đúng là {win}. Thử lại nhé!", color=discord.Color.red())
+    
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+    
+    user = f"{interaction.user.name}#{interaction.user.discriminator}"
+    guild_name = interaction.guild.name if interaction.guild else "Direct Message"
+    log_command(user, f"/guess {number}", guild_name, "Slash Command")
+    await send_dm_notification(user, f"/guess {number}", guild_name, "Slash Command")
+
+@bot.command()
+async def slot(ctx, amount: int):
+    if is_user_banned(ctx.author.id):
+        embed = discord.Embed(title="❌ Bị cấm", description="Bạn đã bị cấm sử dụng bot này!", color=discord.Color.red())
+        await ctx.send(embed=embed)
+        return
+    
+    if amount <= 0:
+        embed = discord.Embed(title="❌ Lỗi", description="Số credits phải lớn hơn 0!", color=discord.Color.red())
+        return await ctx.send(embed=embed)
+    
+    if get_balance(ctx.author.id) < amount:
+        embed = discord.Embed(title="❌ Lỗi", description="Không đủ credits!", color=discord.Color.red())
+        return await ctx.send(embed=embed)
+    
+    symbols = ["🍒", "🍋", "🍉", "⭐", "💎"]
+    result = [random.choice(symbols) for _ in range(3)]
+    
+    embed = discord.Embed(title="🎰 Slot Machine", description=" | ".join(result), color=discord.Color.purple())
+    
+    if len(set(result)) == 1:
+        add_balance(ctx.author.id, amount * 5)
+        embed.add_field(name="🎰 JACKPOT!", value=f"Bạn nhận **{amount * 5}** credits!", inline=False)
+    elif len(set(result)) == 2:
+        add_balance(ctx.author.id, amount * 2)
+        embed.add_field(name="🎰 Trúng nhỏ!", value=f"Bạn nhận **{amount * 2}** credits!", inline=False)
+    else:
+        remove_balance(ctx.author.id, amount)
+        embed.add_field(name="🎰 Thua!", value=f"Mất **{amount}** credits!", inline=False)
+    
+    await ctx.send(embed=embed)
+    
+    user = f"{ctx.author.name}#{ctx.author.discriminator}"
+    guild_name = ctx.guild.name if ctx.guild else "Direct Message"
+    log_command(user, f"!slot {amount}", guild_name, "Text Command")
+    await send_dm_notification(user, f"!slot {amount}", guild_name, "Text Command")
+
+@bot.tree.command(name="slot", description="Chơi slot machine với credits")
+async def slot_slash(interaction: discord.Interaction, amount: int):
+    if is_user_banned(interaction.user.id):
+        embed = discord.Embed(title="❌ Bị cấm", description="Bạn đã bị cấm sử dụng bot này!", color=discord.Color.red())
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        return
+    
+    if amount <= 0:
+        embed = discord.Embed(title="❌ Lỗi", description="Số credits phải lớn hơn 0!", color=discord.Color.red())
+        return await interaction.response.send_message(embed=embed, ephemeral=True)
+    
+    if get_balance(interaction.user.id) < amount:
+        embed = discord.Embed(title="❌ Lỗi", description="Không đủ credits!", color=discord.Color.red())
+        return await interaction.response.send_message(embed=embed, ephemeral=True)
+    
+    symbols = ["🍒", "🍋", "🍉", "⭐", "💎"]
+    result = [random.choice(symbols) for _ in range(3)]
+    
+    embed = discord.Embed(title="🎰 Slot Machine", description=" | ".join(result), color=discord.Color.purple())
+    
+    if len(set(result)) == 1:
+        add_balance(interaction.user.id, amount * 5)
+        embed.add_field(name="🎰 JACKPOT!", value=f"Bạn nhận **{amount * 5}** credits!", inline=False)
+    elif len(set(result)) == 2:
+        add_balance(interaction.user.id, amount * 2)
+        embed.add_field(name="🎰 Trúng nhỏ!", value=f"Bạn nhận **{amount * 2}** credits!", inline=False)
+    else:
+        remove_balance(interaction.user.id, amount)
+        embed.add_field(name="🎰 Thua!", value=f"Mất **{amount}** credits!", inline=False)
+    
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+    
+    user = f"{interaction.user.name}#{interaction.user.discriminator}"
+    guild_name = interaction.guild.name if interaction.guild else "Direct Message"
+    log_command(user, f"/slot {amount}", guild_name, "Slash Command")
+    await send_dm_notification(user, f"/slot {amount}", guild_name, "Slash Command")
+
+# ====== SHOP SYSTEM ======
+@bot.command()
+async def shop(ctx):
+    if is_user_banned(ctx.author.id):
+        embed = discord.Embed(title="❌ Bị cấm", description="Bạn đã bị cấm sử dụng bot này!", color=discord.Color.red())
+        await ctx.send(embed=embed)
+        return
+    
+    embed = discord.Embed(title="🏪 Cửa Hàng", color=discord.Color.blue())
+    
+    for role_id, item in shop_data.items():
+        embed.add_field(
+            name=f"🛒 {item['name']} - {item['price']} credits",
+            value=f"{item['description']}",
+            inline=False
+        )
+    
+    embed.set_footer(text="Sử dụng /buy để mua items")
+    await ctx.send(embed=embed)
+    
+    user = f"{ctx.author.name}#{ctx.author.discriminator}"
+    guild_name = ctx.guild.name if ctx.guild else "Direct Message"
+    log_command(user, "!shop", guild_name, "Text Command")
+    await send_dm_notification(user, "!shop", guild_name, "Text Command")
+
+@bot.tree.command(name="shop", description="Xem cửa hàng")
+async def shop_slash(interaction: discord.Interaction):
+    if is_user_banned(interaction.user.id):
+        embed = discord.Embed(title="❌ Bị cấm", description="Bạn đã bị cấm sử dụng bot này!", color=discord.Color.red())
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        return
+    
+    embed = discord.Embed(title="🏪 Cửa Hàng", color=discord.Color.blue())
+    
+    for role_id, item in shop_data.items():
+        embed.add_field(
+            name=f"🛒 {item['name']} - {item['price']} credits",
+            value=f"{item['description']}",
+            inline=False
+        )
+    
+    embed.set_footer(text="Sử dụng /buy để mua items")
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+    
+    user = f"{interaction.user.name}#{interaction.user.discriminator}"
+    guild_name = interaction.guild.name if interaction.guild else "Direct Message"
+    log_command(user, "/shop", guild_name, "Slash Command")
+    await send_dm_notification(user, "/shop", guild_name, "Slash Command")
+
+@bot.tree.command(name="buy", description="Mua item từ cửa hàng")
+@app_commands.choices(item=[
+    app_commands.Choice(name="VIP Role - 10000 credits", value="vip"),
+    app_commands.Choice(name="Vip+ Role - 50000 credits", value="vipplus"),
+    app_commands.Choice(name="Vip++ Role - 70000 credits", value="vipplusplus"),
+    app_commands.Choice(name="MVP Role - 100000 credits", value="mvp"),
+    app_commands.Choice(name="MVP+ Role - 150000 credits", value="mvpplus"),
+    app_commands.Choice(name="MVP++ Role - 300000 credits", value="mvpplusplus"),
+    app_commands.Choice(name="Manager Role - 999999999999 credits", value="managerbot")
+])
+async def buy_slash(interaction: discord.Interaction, item: app_commands.Choice[str]):
+    if is_user_banned(interaction.user.id):
+        embed = discord.Embed(title="❌ Bị cấm", description="Bạn đã bị cấm sử dụng bot này!", color=discord.Color.red())
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        return
+    
+    item_data = shop_data.get(item.value)
+    if not item_data:
+        embed = discord.Embed(title="❌ Lỗi", description="Item không tồn tại!", color=discord.Color.red())
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        return
+    
+    price = item_data['price']
+    role_id = item_data['role_id']
+    
+    if get_balance(interaction.user.id) < price:
+        embed = discord.Embed(title="❌ Không đủ credits", description=f"Bạn cần {price} credits để mua {item_data['name']}!", color=discord.Color.red())
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        return
+    
+    role = interaction.guild.get_role(role_id)
+    if not role:
+        embed = discord.Embed(title="❌ Lỗi", description="Role không tồn tại trong server!", color=discord.Color.red())
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        return
+    
+    if role in interaction.user.roles:
+        embed = discord.Embed(title="❌ Đã có role", description=f"Bạn đã có role {item_data['name']} rồi!", color=discord.Color.red())
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        return
+    
+    if remove_balance(interaction.user.id, price):
+        await interaction.user.add_roles(role)
+        embed = discord.Embed(title="✅ Mua thành công", description=f"Đã mua {item_data['name']} với {price} credits!", color=discord.Color.green())
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+    else:
+        embed = discord.Embed(title="❌ Lỗi", description="Không thể thực hiện giao dịch!", color=discord.Color.red())
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+    
+    user = f"{interaction.user.name}#{interaction.user.discriminator}"
+    guild_name = interaction.guild.name if interaction.guild else "Direct Message"
+    log_command(user, f"/buy {item.value}", guild_name, "Slash Command")
+    await send_dm_notification(user, f"/buy {item.value}", guild_name, "Slash Command")
+
+# ====== LEVEL COMMANDS ======
+@bot.command()
+async def rank(ctx, member: discord.Member = None):
+    if is_user_banned(ctx.author.id):
+        embed = discord.Embed(title="❌ Bị cấm", description="Bạn đã bị cấm sử dụng bot này!", color=discord.Color.red())
+        await ctx.send(embed=embed)
+        return
+    
+    member = member or ctx.author
+    user_data = levels.get(str(member.id), {"xp": 0, "level": 1})
+    
+    embed = discord.Embed(title="🏆 Rank", color=discord.Color.purple())
+    embed.add_field(name="👤 User", value=member.mention, inline=True)
+    embed.add_field(name="📊 Level", value=user_data['level'], inline=True)
+    embed.add_field(name="⭐ XP", value=user_data['xp'], inline=True)
+    
+    await ctx.send(embed=embed)
+    
+    user = f"{ctx.author.name}#{ctx.author.discriminator}"
+    guild_name = ctx.guild.name if ctx.guild else "Direct Message"
+    log_command(user, f"!rank {member.name}", guild_name, "Text Command")
+    await send_dm_notification(user, f"!rank {member.name}", guild_name, "Text Command")
+
+@bot.tree.command(name="rank", description="Xem level và XP của bạn hoặc thành viên khác")
+async def rank_slash(interaction: discord.Interaction, member: discord.Member = None):
+    if is_user_banned(interaction.user.id):
+        embed = discord.Embed(title="❌ Bị cấm", description="Bạn đã bị cấm sử dụng bot này!", color=discord.Color.red())
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        return
+    
+    member = member or interaction.user
+    user_data = levels.get(str(member.id), {"xp": 0, "level": 1})
+    
+    embed = discord.Embed(title="🏆 Rank", color=discord.Color.purple())
+    embed.add_field(name="👤 User", value=member.mention, inline=True)
+    embed.add_field(name="📊 Level", value=user_data['level'], inline=True)
+    embed.add_field(name="⭐ XP", value=user_data['xp'], inline=True)
+    
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+    
+    user = f"{interaction.user.name}#{interaction.user.discriminator}"
+    guild_name = interaction.guild.name if interaction.guild else "Direct Message"
+    log_command(user, "/rank", guild_name, "Slash Command")
+    await send_dm_notification(user, "/rank", guild_name, "Slash Command")
+
+@bot.command()
+async def leaderboard(ctx, type: str = "credits"):
+    if is_user_banned(ctx.author.id):
+        embed = discord.Embed(title="❌ Bị cấm", description="Bạn đã bị cấm sử dụng bot này!", color=discord.Color.red())
+        await ctx.send(embed=embed)
+        return
+    
+    if type == "credits":
+        top = sorted(credits.items(), key=lambda x: x[1], reverse=True)[:10]
+        embed = discord.Embed(title="🏅 Top 10 Credits", color=discord.Color.gold())
+        for i, (uid, amt) in enumerate(top, 1):
+            user = ctx.guild.get_member(int(uid))
+            name = user.display_name if user else f"User {uid}"
+            embed.add_field(name=f"{i}. {name}", value=f"{amt} credits", inline=False)
+    elif type == "level":
+        top = sorted(levels.items(), key=lambda x: x[1].get("level", 1), reverse=True)[:10]
+        embed = discord.Embed(title="🏅 Top 10 Levels", color=discord.Color.gold())
+        for i, (uid, info) in enumerate(top, 1):
+            user = ctx.guild.get_member(int(uid))
+            name = user.display_name if user else f"User {uid}"
+            embed.add_field(name=f"{i}. {name}", value=f"Level {info.get('level', 1)}", inline=False)
+    else:
+        embed = discord.Embed(title="❌ Lỗi", description="Loại leaderboard không hợp lệ! Dùng 'credits' hoặc 'level'", color=discord.Color.red())
+    
+    await ctx.send(embed=embed)
+    
+    user = f"{ctx.author.name}#{ctx.author.discriminator}"
+    guild_name = ctx.guild.name if ctx.guild else "Direct Message"
+    log_command(user, f"!leaderboard {type}", guild_name, "Text Command")
+    await send_dm_notification(user, f"!leaderboard {type}", guild_name, "Text Command")
+
+@bot.tree.command(name="leaderboard", description="Xem bảng xếp hạng credits hoặc level")
+@app_commands.describe(type="Chọn loại bảng xếp hạng")
+@app_commands.choices(type=[
+    app_commands.Choice(name="Credits", value="credits"),
+    app_commands.Choice(name="Level", value="level")
+])
+async def leaderboard_slash(interaction: discord.Interaction, type: app_commands.Choice[str]):
+    if is_user_banned(interaction.user.id):
+        embed = discord.Embed(
+            title="❌ Bị cấm",
+            description="Bạn đã bị cấm sử dụng bot này!",
+            color=discord.Color.red()
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        return
+
+    # Dùng value từ dropdown
+    type = type.value  
+
+    if type == "credits":
+        top = sorted(credits.items(), key=lambda x: x[1], reverse=True)[:10]
+        embed = discord.Embed(title="🏅 Top 10 Credits", color=discord.Color.gold())
+        for i, (uid, amt) in enumerate(top, 1):
+            try:
+                user = await bot.fetch_user(int(uid))
+                name = user.name
+            except:
+                name = f"User {uid}"
+            embed.add_field(name=f"{i}. {name}", value=f"{amt} credits", inline=False)
+
+    elif type == "level":
+        top = sorted(levels.items(), key=lambda x: x[1].get("level", 1), reverse=True)[:10]
+        embed = discord.Embed(title="🏅 Top 10 Levels", color=discord.Color.gold())
+        for i, (uid, info) in enumerate(top, 1):
+            try:
+                user = await bot.fetch_user(int(uid))
+                name = user.name
+            except:
+                name = f"User {uid}"
+            embed.add_field(name=f"{i}. {name}", value=f"Level {info.get('level', 1)}", inline=False)
+
+    else:
+        embed = discord.Embed(
+            title="❌ Lỗi",
+            description="Loại leaderboard không hợp lệ!",
+            color=discord.Color.red()
+        )
+
+    await interaction.response.send_message(embed=embed, ephemeral=False)
+
+    # Log
+    user = f"{interaction.user.name}#{interaction.user.discriminator}"
+    guild_name = interaction.guild.name if interaction.guild else "Direct Message"
+    log_command(user, f"/leaderboard {type}", guild_name, "Slash Command")
+    await send_dm_notification(user, f"/leaderboard {type}", guild_name, "Slash Command")
+    
+# ====== UTILITY COMMANDS ======
+@bot.command()
+async def serverinfo(ctx):
+    if is_user_banned(ctx.author.id):
+        embed = discord.Embed(title="❌ Bị cấm", description="Bạn đã bị cấm sử dụng bot này!", color=discord.Color.red())
+        await ctx.send(embed=embed)
+        return
+    
+    guild = ctx.guild
+    embed = discord.Embed(title=f"🏠 Thông tin server: {guild.name}", color=0x00ff00)
+    embed.add_field(name="👥 Thành viên", value=guild.member_count, inline=True)
+    embed.add_field(name="👑 Chủ server", value=guild.owner.mention, inline=True)
+    embed.add_field(name="📅 Tạo ngày", value=guild.created_at.strftime("%d/%m/%Y"), inline=True)
+    embed.set_thumbnail(url=guild.icon.url if guild.icon else None)
+    await ctx.send(embed=embed)
+    
+    user = f"{ctx.author.name}#{ctx.author.discriminator}"
+    guild_name = ctx.guild.name if ctx.guild else "Direct Message"
+    log_command(user, "!serverinfo", guild_name, "Text Command")
+    await send_dm_notification(user, "!serverinfo", guild_name, "Text Command")
+
+@bot.tree.command(name="serverinfo", description="Xem thông tin server")
+async def serverinfo_slash(interaction: discord.Interaction):
+    if is_user_banned(interaction.user.id):
+        embed = discord.Embed(title="❌ Bị cấm", description="Bạn đã bị cấm sử dụng bot này!", color=discord.Color.red())
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        return
+    
+    guild = interaction.guild
+    embed = discord.Embed(title=f"🏠 Thông tin server: {guild.name}", color=0x00ff00)
+    embed.add_field(name="👥 Thành viên", value=guild.member_count, inline=True)
+    embed.add_field(name="👑 Chủ server", value=guild.owner.mention, inline=True)
+    embed.add_field(name="📅 Tạo ngày", value=guild.created_at.strftime("%d/%m/%Y"), inline=True)
+    embed.set_thumbnail(url=guild.icon.url if guild.icon else None)
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+    
+    user = f"{interaction.user.name}#{interaction.user.discriminator}"
+    guild_name = interaction.guild.name if interaction.guild else "Direct Message"
+    log_command(user, "/serverinfo", guild_name, "Slash Command")
+    await send_dm_notification(user, "/serverinfo", guild_name, "Slash Command")
+
+@bot.command()
+async def userinfo(ctx, member: discord.Member = None):
+    if is_user_banned(ctx.author.id):
+        embed = discord.Embed(title="❌ Bị cấm", description="Bạn đã bị cấm sử dụng bot này!", color=discord.Color.red())
+        await ctx.send(embed=embed)
+        return
+    
+    member = member or ctx.author
+    embed = discord.Embed(title=f"👤 Thông tin user: {member.name}", color=0x00ff00)
+    embed.add_field(name="🆔 ID", value=member.id, inline=True)
+    embed.add_field(name="📅 Tạo tài khoản", value=member.created_at.strftime("%d/%m/%Y"), inline=True)
+    embed.add_field(name="📅 Tham gia server", value=member.joined_at.strftime("%d/%m/%Y"), inline=True)
+    embed.set_thumbnail(url=member.avatar.url if member.avatar else None)
+    await ctx.send(embed=embed)
+    
+    user = f"{ctx.author.name}#{ctx.author.discriminator}"
+    guild_name = ctx.guild.name if ctx.guild else "Direct Message"
+    log_command(user, f"!userinfo {member.name}", guild_name, "Text Command")
+    await send_dm_notification(user, f"!userinfo {member.name}", guild_name, "Text Command")
+
+@bot.tree.command(name="userinfo", description="Xem thông tin user")
+async def userinfo_slash(interaction: discord.Interaction, member: discord.Member = None):
+    if is_user_banned(interaction.user.id):
+        embed = discord.Embed(title="❌ Bị cấm", description="Bạn đã bị cấm sử dụng bot này!", color=discord.Color.red())
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        return
+    
+    member = member or interaction.user
+    embed = discord.Embed(title=f"👤 Thông tin user: {member.name}", color=0x00ff00)
+    embed.add_field(name="🆔 ID", value=member.id, inline=True)
+    embed.add_field(name="📅 Tạo tài khoản", value=member.created_at.strftime("%d/%m/%Y"), inline=True)
+    embed.add_field(name="📅 Tham gia server", value=member.joined_at.strftime("%d/%m/%Y"), inline=True)
+    embed.set_thumbnail(url=member.avatar.url if member.avatar else None)
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+    
+    user = f"{interaction.user.name}#{interaction.user.discriminator}"
+    guild_name = interaction.guild.name if interaction.guild else "Direct Message"
+    log_command(user, "/userinfo", guild_name, "Slash Command")
+    await send_dm_notification(user, "/userinfo", guild_name, "Slash Command")
+
+@bot.command()
+async def premium(ctx):
+    if is_user_banned(ctx.author.id):
+        embed = discord.Embed(title="❌ Bị cấm", description="Bạn đã bị cấm sử dụng bot này!", color=discord.Color.red())
+        await ctx.send(embed=embed)
+        return
+    
+    embed = discord.Embed(title="💎 Premium", description=f"{ctx.author.mention}, bạn đang dùng bản Free.", color=0xffd700)
+    embed.add_field(name="Tính năng Premium", value="• Không giới hạn music\n• Priority support\n• Custom commands", inline=False)
+    await ctx.send(embed=embed)
+    
+    user = f"{ctx.author.name}#{ctx.author.discriminator}"
+    guild_name = ctx.guild.name if ctx.guild else "Direct Message"
+    log_command(user, "!premium", guild_name, "Text Command")
+    await send_dm_notification(user, "!premium", guild_name, "Text Command")
+
+@bot.tree.command(name="premium", description="Thông tin về gói Premium")
+async def premium_slash(interaction: discord.Interaction):
+    if is_user_banned(interaction.user.id):
+        embed = discord.Embed(title="❌ Bị cấm", description="Bạn đã bị cấm sử dụng bot này!", color=discord.Color.red())
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        return
+    
+    embed = discord.Embed(title="💎 Premium", description=f"{interaction.user.mention}, bạn đang dùng bản Free.", color=0xffd700)
+    embed.add_field(name="Tính năng Premium", value="• Không giới hạn music\n• Priority support\n• Custom commands", inline=False)
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+    
+    user = f"{interaction.user.name}#{interaction.user.discriminator}"
+    guild_name = interaction.guild.name if interaction.guild else "Direct Message"
+    log_command(user, "/premium", guild_name, "Slash Command")
+    await send_dm_notification(user, "/premium", guild_name, "Slash Command")
+
+# ====== MUSIC SYSTEM ======
+ytdl_opts = {
+    'format': 'bestaudio/best',
+    'extractaudio': True,
+    'audioformat': 'mp3',
+    'outtmpl': '%(extractor)s-%(id)s-%(title)s.%(ext)s',
+    'restrictfilenames': True,
+    'noplaylist': True,
+    'nocheckcertificate': True,
+    'ignoreerrors': False,
+    'logtostderr': False,
+    'quiet': True,
+    'no_warnings': True,
+    'default_search': 'auto',
+    'source_address': '0.0.0.0',
+}
+
+ffmpeg_opts = {
+    'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
+    'options': '-vn'
+}
+
+ytdl = youtube_dl.YoutubeDL(ytdl_opts)
+
+class YTDLSource(discord.PCMVolumeTransformer):
+    def __init__(self, source, *, data, volume=0.5):
+        super().__init__(source, volume)
+        self.data = data
+        self.title = data.get('title')
+        self.url = data.get('url')
+
+    @classmethod
+    async def from_url(cls, url, *, loop=None, stream=False):
+        loop = loop or asyncio.get_event_loop()
+        data = await loop.run_in_executor(None, lambda: ytdl.extract_info(url, download=not stream))
+        
+        if 'entries' in data:
+            data = data['entries'][0]
+            
+        filename = data['url'] if stream else ytdl.prepare_filename(data)
+        return cls(discord.FFmpegPCMAudio(filename, **ffmpeg_opts), data=data)
+
+@bot.command()
+async def join(ctx):
+    if is_user_banned(ctx.author.id):
+        embed = discord.Embed(title="❌ Bị cấm", description="Bạn đã bị cấm sử dụng bot này!", color=discord.Color.red())
+        await ctx.send(embed=embed)
+        return
+    
+    if ctx.author.voice:
+        await ctx.author.voice.channel.connect()
+        embed = discord.Embed(title="✅ Đã kết nối", description=f"Đã kết nối đến {ctx.author.voice.channel.name}", color=discord.Color.green())
+        await ctx.send(embed=embed)
+    else:
+        embed = discord.Embed(title="❌ Lỗi", description="Bạn chưa vào voice channel.", color=discord.Color.red())
+        await ctx.send(embed=embed)
+    
+    user = f"{ctx.author.name}#{ctx.author.discriminator}"
+    guild_name = ctx.guild.name if ctx.guild else "Direct Message"
+    log_command(user, "!join", guild_name, "Text Command")
+    await send_dm_notification(user, "!join", guild_name, "Text Command")
+
+@bot.tree.command(name="join", description="Bot tham gia voice channel của bạn")
+async def join_slash(interaction: discord.Interaction):
+    if is_user_banned(interaction.user.id):
+        embed = discord.Embed(title="❌ Bị cấm", description="Bạn đã bị cấm sử dụng bot này!", color=discord.Color.red())
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        return
+    
+    if interaction.user.voice:
+        await interaction.user.voice.channel.connect()
+        embed = discord.Embed(title="✅ Đã kết nối", description=f"Đã kết nối đến {interaction.user.voice.channel.name}", color=discord.Color.green())
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+    else:
+        embed = discord.Embed(title="❌ Lỗi", description="Bạn chưa vào voice channel.", color=discord.Color.red())
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+    
+    user = f"{interaction.user.name}#{interaction.user.discriminator}"
+    guild_name = interaction.guild.name if interaction.guild else "Direct Message"
+    log_command(user, "/join", guild_name, "Slash Command")
+    await send_dm_notification(user, "/join", guild_name, "Slash Command")
+
+@bot.command()
+async def leave(ctx):
+    if is_user_banned(ctx.author.id):
+        embed = discord.Embed(title="❌ Bị cấm", description="Bạn đã bị cấm sử dụng bot này!", color=discord.Color.red())
+        await ctx.send(embed=embed)
+        return
+    
+    if ctx.voice_client:
+        await ctx.voice_client.disconnect()
+        embed = discord.Embed(title="✅ Đã rời khỏi", description="Đã rời khỏi voice channel.", color=discord.Color.green())
+        await ctx.send(embed=embed)
+    else:
+        embed = discord.Embed(title="❌ Lỗi", description="Bot không ở trong voice channel.", color=discord.Color.red())
+        await ctx.send(embed=embed)
+    
+    user = f"{ctx.author.name}#{ctx.author.discriminator}"
+    guild_name = ctx.guild.name if ctx.guild else "Direct Message"
+    log_command(user, "!leave", guild_name, "Text Command")
+    await send_dm_notification(user, "!leave", guild_name, "Text Command")
+
+@bot.tree.command(name="leave", description="Bot rời khỏi voice channel")
+async def leave_slash(interaction: discord.Interaction):
+    if is_user_banned(interaction.user.id):
+        embed = discord.Embed(title="❌ Bị cấm", description="Bạn đã bị cấm sử dụng bot này!", color=discord.Color.red())
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        return
+    
+    if interaction.guild.voice_client:
+        await interaction.guild.voice_client.disconnect()
+        embed = discord.Embed(title="✅ Đã rời khỏi", description="Đã rời khỏi voice channel.", color=discord.Color.green())
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+    else:
+        embed = discord.Embed(title="❌ Lỗi", description="Bot không ở trong voice channel.", color=discord.Color.red())
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+    
+    user = f"{interaction.user.name}#{interaction.user.discriminator}"
+    guild_name = interaction.guild.name if interaction.guild else "Direct Message"
+    log_command(user, "/leave", guild_name, "Slash Command")
+    await send_dm_notification(user, "/leave", guild_name, "Slash Command")
+
+@bot.command()
+async def play(ctx, *, query: str):
+    if is_user_banned(ctx.author.id):
+        embed = discord.Embed(title="❌ Bị cấm", description="Bạn đã bị cấm sử dụng bot này!", color=discord.Color.red())
+        await ctx.send(embed=embed)
+        return
+    
+    if not ctx.voice_client:
+        if ctx.author.voice:
+            await ctx.author.voice.channel.connect()
+        else:
+            embed = discord.Embed(title="❌ Lỗi", description="Bạn chưa vào voice channel.", color=discord.Color.red())
+            return await ctx.send(embed=embed)
+    
+    async with ctx.typing():
+        try:
+            player = await YTDLSource.from_url(query, loop=bot.loop, stream=True)
+            ctx.voice_client.stop()
+            ctx.voice_client.play(player, after=lambda e: print(f'Player error: {e}') if e else None)
+            embed = discord.Embed(title="🎵 Đang phát", description=f"**{player.title}**", color=discord.Color.green())
+            await ctx.send(embed=embed)
+        except Exception as e:
+            embed = discord.Embed(title="❌ Lỗi", description=f"Lỗi khi phát nhạc: {e}", color=discord.Color.red())
+            await ctx.send(embed=embed)
+    
+    user = f"{ctx.author.name}#{ctx.author.discriminator}"
+    guild_name = ctx.guild.name if ctx.guild else "Direct Message"
+    log_command(user, f"!play {query}", guild_name, "Text Command")
+    await send_dm_notification(user, f"!play {query}", guild_name, "Text Command")
+
+@bot.tree.command(name="play", description="Phát nhạc từ YouTube")
+async def play_slash(interaction: discord.Interaction, query: str):
+    if is_user_banned(interaction.user.id):
+        embed = discord.Embed(title="❌ Bị cấm", description="Bạn đã bị cấm sử dụng bot này!", color=discord.Color.red())
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        return
+    
+    if not interaction.guild.voice_client:
+        if interaction.user.voice:
+            await interaction.user.voice.channel.connect()
+        else:
+            embed = discord.Embed(title="❌ Lỗi", description="Bạn chưa vào voice channel.", color=discord.Color.red())
+            return await interaction.response.send_message(embed=embed, ephemeral=True)
+    
+    await interaction.response.defer()
+    try:
+        player = await YTDLSource.from_url(query, loop=bot.loop, stream=True)
+        interaction.guild.voice_client.stop()
+        interaction.guild.voice_client.play(player, after=lambda e: print(f'Player error: {e}') if e else None)
+        embed = discord.Embed(title="🎵 Đang phát", description=f"**{player.title}**", color=discord.Color.green())
+        await interaction.followup.send(embed=embed)
+    except Exception as e:
+        embed = discord.Embed(title="❌ Lỗi", description=f"Lỗi khi phát nhạc: {e}", color=discord.Color.red())
+        await interaction.followup.send(embed=embed)
+    
+    user = f"{interaction.user.name}#{interaction.user.discriminator}"
+    guild_name = interaction.guild.name if interaction.guild else "Direct Message"
+    log_command(user, f"/play {query}", guild_name, "Slash Command")
+    await send_dm_notification(user, f"/play {query}", guild_name, "Slash Command")
+
+@bot.command()
+async def stop(ctx):
+    if is_user_banned(ctx.author.id):
+        embed = discord.Embed(title="❌ Bị cấm", description="Bạn đã bị cấm sử dụng bot này!", color=discord.Color.red())
+        await ctx.send(embed=embed)
+        return
+    
+    if ctx.voice_client:
+        ctx.voice_client.stop()
+        embed = discord.Embed(title="⏹️ Đã dừng", description="Đã dừng phát nhạc.", color=discord.Color.green())
+        await ctx.send(embed=embed)
+    else:
+        embed = discord.Embed(title="❌ Lỗi", description="Bot không đang phát nhạc.", color=discord.Color.red())
+        await ctx.send(embed=embed)
+    
+    user = f"{ctx.author.name}#{ctx.author.discriminator}"
+    guild_name = ctx.guild.name if ctx.guild else "Direct Message"
+    log_command(user, "!stop", guild_name, "Text Command")
+    await send_dm_notification(user, "!stop", guild_name, "Text Command")
+
+@bot.tree.command(name="stop", description="Dừng phát nhạc")
+async def stop_slash(interaction: discord.Interaction):
+    if is_user_banned(interaction.user.id):
+        embed = discord.Embed(title="❌ Bị cấm", description="Bạn đã bị cấm sử dụng bot này!", color=discord.Color.red())
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        return
+    
+    if interaction.guild.voice_client:
+        interaction.guild.voice_client.stop()
+        embed = discord.Embed(title="⏹️ Đã dừng", description="Đã dừng phát nhạc.", color=discord.Color.green())
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+    else:
+        embed = discord.Embed(title="❌ Lỗi", description="Bot không đang phát nhạc.", color=discord.Color.red())
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+    
+    user = f"{interaction.user.name}#{interaction.user.discriminator}"
+    guild_name = interaction.guild.name if interaction.guild else "Direct Message"
+    log_command(user, "/stop", guild_name, "Slash Command")
+    await send_dm_notification(user, "/stop", guild_name, "Slash Command")
+
+@bot.command()
+async def pause(ctx):
+    if is_user_banned(ctx.author.id):
+        embed = discord.Embed(title="❌ Bị cấm", description="Bạn đã bị cấm sử dụng bot này!", color=discord.Color.red())
+        await ctx.send(embed=embed)
+        return
+    
+    if ctx.voice_client and ctx.voice_client.is_playing():
+        ctx.voice_client.pause()
+        embed = discord.Embed(title="⏸️ Đã tạm dừng", description="Đã tạm dừng phát nhạc.", color=discord.Color.green())
+        await ctx.send(embed=embed)
+    else:
+        embed = discord.Embed(title="❌ Lỗi", description="Không có nhạc đang phát.", color=discord.Color.red())
+        await ctx.send(embed=embed)
+    
+    user = f"{ctx.author.name}#{ctx.author.discriminator}"
+    guild_name = ctx.guild.name if ctx.guild else "Direct Message"
+    log_command(user, "!pause", guild_name, "Text Command")
+    await send_dm_notification(user, "!pause", guild_name, "Text Command")
+
+@bot.tree.command(name="pause", description="Tạm dừng nhạc")
+async def pause_slash(interaction: discord.Interaction):
+    if is_user_banned(interaction.user.id):
+        embed = discord.Embed(title="❌ Bị cấm", description="Bạn đã bị cấm sử dụng bot này!", color=discord.Color.red())
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        return
+    
+    if interaction.guild.voice_client and interaction.guild.voice_client.is_playing():
+        interaction.guild.voice_client.pause()
+        embed = discord.Embed(title="⏸️ Đã tạm dừng", description="Đã tạm dừng phát nhạc.", color=discord.Color.green())
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+    else:
+        embed = discord.Embed(title="❌ Lỗi", description="Không có nhạc đang phát.", color=discord.Color.red())
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+    
+    user = f"{interaction.user.name}#{interaction.user.discriminator}"
+    guild_name = interaction.guild.name if interaction.guild else "Direct Message"
+    log_command(user, "/pause", guild_name, "Slash Command")
+    await send_dm_notification(user, "/pause", guild_name, "Slash Command")
+
+@bot.command()
+async def resume(ctx):
+    if is_user_banned(ctx.author.id):
+        embed = discord.Embed(title="❌ Bị cấm", description="Bạn đã bị cấm sử dụng bot này!", color=discord.Color.red())
+        await ctx.send(embed=embed)
+        return
+    
+    if ctx.voice_client and ctx.voice_client.is_paused():
+        ctx.voice_client.resume()
+        embed = discord.Embed(title="▶️ Đã tiếp tục", description="Đã tiếp tục phát nhạc.", color=discord.Color.green())
+        await ctx.send(embed=embed)
+    else:
+        embed = discord.Embed(title="❌ Lỗi", description="Nhạc không đang tạm dừng.", color=discord.Color.red())
+        await ctx.send(embed=embed)
+    
+    user = f"{ctx.author.name}#{ctx.author.discriminator}"
+    guild_name = ctx.guild.name if ctx.guild else "Direct Message"
+    log_command(user, "!resume", guild_name, "Text Command")
+    await send_dm_notification(user, "!resume", guild_name, "Text Command")
+
+@bot.tree.command(name="resume", description="Tiếp tục phát nhạc")
+async def resume_slash(interaction: discord.Interaction):
+    if is_user_banned(interaction.user.id):
+        embed = discord.Embed(title="❌ Bị cấm", description="Bạn đã bị cấm sử dụng bot này!", color=discord.Color.red())
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+        return
+        
+    if interaction.guild.voice_client and interaction.guild.voice_client.is_paused():
+        interaction.guild.voice_client.resume()
+        embed = discord.Embed(title="▶️ Đã tiếp tục", description="Đã tiếp tục phát nhạc.", color=discord.Color.green())
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+    else:
+        embed = discord.Embed(title="❌ Lỗi", description="Nhạc không đang tạm dừng.", color=discord.Color.red())
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+    
+    user = f"{interaction.user.name}#{interaction.user.discriminator}"
+    guild_name = interaction.guild.name if interaction.guild else "Direct Message"
+    log_command(user, "/resume", guild_name, "Slash Command")
+    await send_dm_notification(user, "/resume", guild_name, "Slash Command")
+
 # Slash Command - Removewhitelist: Xóa người dùng khỏi whitelist
 @bot.tree.command(name="removewhitelist", description="Xóa người dùng khỏi danh sách được phép sử dụng bot")
 @app_commands.describe(
