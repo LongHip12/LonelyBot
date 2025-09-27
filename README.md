@@ -59,7 +59,7 @@
 
 • `rank <user>` - Check user rank
 
-• `buy <item> - Buy role/rank from server
+• `buy <item>` - Buy role/rank from server
 
 • `shop` - See what the shop sells
 
