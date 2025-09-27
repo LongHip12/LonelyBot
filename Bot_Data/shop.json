@@ -2,43 +2,43 @@
     "vip": {
         "price": 10000,
         "role_id": 1420718498530721864,
-        "name": "VIP Role",
+        "name": "<:vip:1421359862780264489> VIP Rank",
         "description": "Receive the VIP Rank on the Lonely Hub Script, Lonely Hub Forums, and Lonely Hub Discord."
     },
     "vipplus": {
         "price": 50000,
         "role_id": 1420718386786340977,
-        "name": "Vip+ Role",
+        "name": "<:vipplus:1421359801975312436>  Vip+ Rank",
         "description": "Receive the VIP+ Rank on the Lonely Hub Script, Lonely Hub Forums, and Lonely Hub Discord."
     },
     "vipplusplus": {
         "price": 70000,
         "role_id": 1421143311900479588,
-        "name": "Vip++ Role",
+        "name": "<:vipplusplus:1421359758711062619> Vip++ Rank",
         "description": "Receive the VIP++ Rank on the Lonely Hub Script, Lonely Hub Forums, and Lonely Hub Discord."
     },
     "mvp": {
         "price": 100000,
         "role_id": 1421143426795307018,
-        "name": "MVP Role",
+        "name": "<:mvp:1421359907030171699> MVP Rank",
         "description": "Receive the MVP Rank on the Lonely Hub Script, Lonely Hub Forums, and Lonely Hub Discord."
     },
     "mvpplus": {
         "price": 150000,
         "role_id": 1421143520034426971,
-        "name": "MVP+ Role",
+        "name": "<:mvpplus:1421359951028162560> MVP+ Rank",
         "description": "Receive the MVP+ Rank on the Lonely Hub Script, Lonely Hub Forums, and Lonely Hub Discord."
     },
     "mvpplusplus": {
         "price": 300000,
         "role_id": 1421143612543991900,
-        "name": "MVP++ Role",
+        "name": "<:mvpplusplus:1421359974092902481> MVP++ Rank",
         "description": "Receive the MVP++ Rank on the Lonely Hub Script, Lonely Hub Forums, and Lonely Hub Discord."
     },
     "managerbot": {
         "price": 999999999999,
         "role_id": 1410600949646364702,
-        "name": "Manager Role",
+        "name": "<:manager:1421365250690777139> Manager Rank",
         "description": "Receive the Manager Rank on the Lonely Hub Script, Lonely Hub Forums, and Lonely Hub Discord."
     }
 }

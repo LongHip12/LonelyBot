@@ -1,0 +1,14 @@
+{
+  "hub": {
+    "name": "Tổng Hợp",
+    "loader": "soon"
+  },
+  "main": {
+    "name": "Main Loader",
+    "loader": "soon"
+  },
+  "kaitun": {
+    "name": "Kaitun Loader",
+    "loader": "soon"
+  }
+}
