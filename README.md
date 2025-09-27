@@ -1,6 +1,6 @@
 # About
 
-• Lonely Bot Is Free And Open Source Spamming & Nukking Bot On Discord.
+• Lonely Bot Is Free And Open Source Spamming & Nukking And Casino Bot On Discord.
 
 # How To Download
 
@@ -37,39 +37,61 @@
 • [Discord Server](https://discord.gg/2anc7nHw6b)
 
 # Commands
-• `help` Shows a list of all the commands available in the bot
+• `help` - Shows a list of all the commands available in the bot
 
-• `info` Show Information About Bot
+• `info` - Show Information About Bot
 
-• `spam` Spam Messages In The Server You Invited Bot
+• `spam` - Spam Messages In The Server You Invited Bot
 
-• `spamv2` Spam Messages In The Server You Invited Bot (No Need Invite)
+• `spamv2` - Spam Messages In The Server You Invited Bot (No Need Invite)
 
-• `say` Make Bot Say Everything
+• `say` - Make Bot Say Everything
 
-• `sayv2` Make Bot Say Everything (No Need Invite)
+• `sayv2` - Make Bot Say Everything (No Need Invite)
 
-• `ghostping` Ghostping User With Mention
+• `ghostping` -'Ghostping User With Mention
 
-• `ghostpingv2` Ghostping User With Mention (No Need Invite)
+• `ghostpingv2` - Ghostping User With Mention (No Need Invite)
 
-• `dms` Send Dms Messages To Users Anonymously
+• `dms` - Send Dms Messages To Users Anonymously
 
-• `ping` Check Bot Latency
+• `leaderboard <credits/level>` - Check level and credits leaderboard
 
-• `invite` Invite Bot To Server
+• `rank <user>` - Check user rank
 
-• `whitelist` Check Whitelisted Users
+• `buy <item> - Buy role/rank from server
 
-• `máy ảo,cách nhận máy ảo` Show How to Get a Cloud Phone (Auto Reply)
+• `shop` - See what the shop sells
 
-• `luật` Show A Server Rules (Auto Reply)
+• `taixiu` - Play Sic bo game
 
-• `client` Show All Roblox Executors (Auto Reply)
+• `lichsutaixiu` - View the history of the last 5 Sic Bo games
+
+• `slot <amount>` - Play slot machine game
+
+• `guess <1-10>` - Guess the number and receive 200 coins
+
+• `gamble <amount>` - Bet with 50/50 odds
+
+• `work` - Work to receive coins
+
+• `balance` - View your balance
+
+• `ping` - Check Bot Latency
+
+• `invite` -Invite Bot To Server
+
+• `serverinfo` - Check server info
+
+• `máy ảo,cách nhận máy ảo` - Show How to Get a Cloud Phone (Auto Reply)
+
+• `luật` - Show A Server Rules (Auto Reply)
+
+• `client` - Show All Roblox Executors (Auto Reply)
 
 **Premium Command (Admin)**
 
-• `premium_command` Show Available Premium Commands of Bot
+• `premium_command` - Show Available Premium Commands of Bot
 
 • `bancmd <user_id> <reason>` - Ban User Use Command
 
@@ -81,14 +103,22 @@
 
 • `removewhitelist <user_id> <name>` - Delete user whitelist
 
-• `?nukeall` Nuke The Server With Rename, Delete All Channels And Ping Everyone
+• `addcoin <user_id> <amount>` - Add coins to user balance
 
-• `?raidall` Raid All Channel Without Everyone
+• `removecoin <user_id> <amount>` - Remove coins from user balance
 
-• `?spampingall` Ping Everyone In All Channel`
+• `setcoin <user_id> <amount>` - Set coins for user balance
 
-• `?banalluser` Ban All Users On Server
+• `?nukeall` - Nuke The Server With Rename, Delete All Channels And Ping Everyone
 
-• `?purgeallwebhook` Delete All Webhook On Server
+• `?raidall` - Raid All Channel Without Everyone
 
-• `?purge [Quanlity]` Delete Messages With Quanlity
+• `?spampingall` - Ping Everyone In All Channel`
+
+• `whitelist` - Check Whitelisted Users
+
+• `?banalluser` - Ban All Users On Server
+
+• `?purgeallwebhook` - Delete All Webhook On Server
+
+• `?purge [Quanlity]` - Delete Messages With Quanlity
