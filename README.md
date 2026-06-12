@@ -1,6 +1,7 @@
 # About
 
 • Lonely Bot Is Free And Open Source Spamming & Nukking,Casino And Music Bot On Discord.
+• Code By: LongHip12 & Chatgpt + Claude
 
 # How To Download
 
